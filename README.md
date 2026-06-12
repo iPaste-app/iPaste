@@ -121,37 +121,6 @@ Rust 后端会在后台监听系统剪贴板，对受支持的内容进行规范
 
 macOS 使用系统 Vision 框架。Windows 使用可在应用偏好设置中安装的 Tesseract 资源。当配置了 `IPASTE_OCR_R2_BASE_URL` 或 `IPASTE_UPDATER_R2_ENDPOINT` 时，发布自动化可以把 OCR 清单和资源镜像到 R2。
 
-## 发布说明
-
-使用发布辅助脚本，让 npm、Tauri 和 Cargo 元数据中的版本号保持一致：
-
-```bash
-npm run release
-```
-
-打标签发布前，至少运行：
-
-```bash
-npm run build
-cargo check --manifest-path src-tauri/Cargo.toml
-```
-
-GitHub Actions 发布工作流在发布签名更新构建时会使用以下 secrets：
-
-| Secret | 用途 |
-| --- | --- |
-| `TAURI_SIGNING_PRIVATE_KEY` | 为更新器产物签名。 |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | 签名私钥密码，如果该私钥设置了密码。 |
-| `IPASTE_UPDATER_R2_ENDPOINT` | 可选的公开 R2 `latest.json` 地址。 |
-| `R2_ACCOUNT_ID` | 可选的 Cloudflare 账户 ID，用于 R2 镜像。 |
-| `R2_BUCKET` | 可选的 R2 bucket 名称。 |
-| `R2_ACCESS_KEY_ID` | 可选的 R2 access key。 |
-| `R2_SECRET_ACCESS_KEY` | 可选的 R2 secret key。 |
-
-发布工作流使用 GitHub Actions 内置的 `GITHUB_TOKEN` 创建和读取当前仓库的 Release。请在仓库设置中为 Actions 开启 read/write workflow permissions。
-
-不要提交更新器私钥。本仓库只应保留 `key/ipaste-updater.key.pub` 这个公开更新器公钥。
-
 ## 参与贡献
 
 仓库公开并补充许可证后，欢迎贡献。
