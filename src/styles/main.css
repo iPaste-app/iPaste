@@ -361,6 +361,11 @@ input:focus-visible {
   gap: 0.375rem;
   overflow-y: hidden;
   overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+}
+
+.category-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 .category-scroll-vertical {
@@ -370,6 +375,11 @@ input:focus-visible {
   overflow-y: auto !important;
   overscroll-behavior: contain;
   padding: 0.125rem;
+  scrollbar-width: thin;
+}
+
+.category-scroll-vertical::-webkit-scrollbar {
+  display: block;
 }
 
 .tag-strip-vertical .category-create-wrap {
@@ -400,11 +410,13 @@ input:focus-visible {
 }
 
 .tag-strip-vertical .category-chip {
+  position: relative;
   width: 100%;
   max-width: none;
   justify-content: flex-start;
-  border-radius: 0.625rem;
-  padding: 0.4375rem 0.625rem;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  padding: 0.4375rem 0.625rem 0.4375rem 1rem;
 }
 
 .category-chip-group {
@@ -419,7 +431,7 @@ input:focus-visible {
 .tag-strip-vertical .category-chip-group {
   min-height: 2.25rem;
   max-width: none;
-  padding: 0.4375rem 0.625rem;
+  padding: 0.4375rem 0.625rem 0.4375rem 1rem;
 }
 
 .category-chip-group:active {
@@ -478,14 +490,38 @@ input:focus-visible {
 }
 
 .category-color-dot {
-  width: 0.75rem;
-  height: 0.75rem;
+  width: 1.125rem;
+  height: 1.125rem;
   flex: 0 0 auto;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.86);
   box-shadow:
     0 0 0 1px rgba(15, 23, 42, 0.1),
     0 1px 2px rgba(15, 23, 42, 0.16);
+}
+
+.category-count-dot {
+  display: inline-grid;
+  min-width: 1.125rem;
+  width: auto;
+  height: 1.125rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 999px;
+  padding: 0 0.1875rem;
+  color: #ffffff;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+    0 0 0 1px rgba(15, 23, 42, 0.08),
+    0 1px 2px rgba(15, 23, 42, 0.16);
+}
+
+.category-count-dot-history {
+  background: #2563eb;
 }
 
 .category-chip-label {
@@ -671,11 +707,36 @@ input:focus-visible {
 
 .tag-strip-vertical .category-chip-active {
   border-color: #bfdbfe;
-  background: #ffffff;
-  color: #1d4ed8;
-  box-shadow:
-    inset 3px 0 0 #2563eb,
-    0 1px 2px rgba(15, 23, 42, 0.06);
+  background: #eff6ff;
+  color: #1e3a8a;
+  box-shadow: none;
+}
+
+.tag-strip-vertical .category-chip-active::before {
+  position: absolute;
+  top: 0.4375rem;
+  bottom: 0.4375rem;
+  left: 0.3125rem;
+  width: 0.1875rem;
+  border-radius: 999px;
+  background: #2563eb;
+  content: "";
+  pointer-events: none;
+}
+
+.tag-strip-vertical .category-chip:hover {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1e3a8a;
+}
+
+.tag-strip-vertical .category-count-dot {
+  order: 2;
+  margin-left: auto;
+}
+
+.tag-strip-vertical .category-chip-label {
+  order: 1;
 }
 
 .category-chip-create {
@@ -1037,12 +1098,22 @@ input:focus-visible {
 }
 
 .category-scroll::-webkit-scrollbar {
+  display: none;
   height: 0.25rem;
 }
 
 .category-scroll-vertical::-webkit-scrollbar {
+  display: block;
   width: 0.25rem;
   height: 0.25rem;
+}
+
+.category-scroll.subtle-scrollbar {
+  scrollbar-width: none;
+}
+
+.category-scroll-vertical.subtle-scrollbar {
+  scrollbar-width: thin;
 }
 
 .clip-context-menu {
@@ -1248,6 +1319,7 @@ input:focus-visible {
 .settings-content {
   min-height: 0;
   flex: 1 1 auto;
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 1.25rem;
 }
@@ -1292,6 +1364,10 @@ input:focus-visible {
   background: rgba(255, 255, 255, 0.92);
   padding: 1rem;
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
+}
+
+.settings-panel > .segmented-control {
+  max-width: 100%;
 }
 
 .data-management-grid {
@@ -2832,7 +2908,9 @@ input:focus-visible {
 .segmented-control {
   display: inline-flex;
   flex: 0 0 auto;
+  min-width: 0;
   align-items: center;
+  overflow: hidden;
   gap: 0.25rem;
   border: 1px solid #e2e8f0;
   border-radius: 0.75rem;
@@ -2841,13 +2919,17 @@ input:focus-visible {
 }
 
 .segmented-option {
-  min-width: 4.25rem;
+  min-width: min(4.25rem, 100%);
   height: 2rem;
+  flex: 0 1 auto;
   border-radius: 0.5625rem;
   padding: 0 0.75rem;
+  overflow: hidden;
   font-size: 0.8125rem;
   font-weight: 600;
   color: #64748b;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   transition:
     background-color 160ms ease,
     color 160ms ease,
@@ -2859,7 +2941,7 @@ input:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 0.375rem;
-  min-width: 6rem;
+  min-width: min(6rem, 100%);
 }
 
 .segmented-option:hover {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import { Check, History, Palette, Pencil, Plus, Trash2 } from "lucide-vue-next";
+import { Check, Palette, Pencil, Plus, Trash2 } from "lucide-vue-next";
+import { t } from "../i18n";
 import { categoryDisplayName } from "../lib/format";
 import type { Category } from "../types";
 
@@ -35,6 +36,8 @@ const props = defineProps<{
   categories: Category[];
   selectedCategoryId: string;
   editingCategoryId: string | null;
+  historyCount: number;
+  categoryCounts: Record<string, number>;
   orientation?: "horizontal" | "vertical";
 }>();
 
@@ -511,6 +514,10 @@ function categoryDragStyle(category: Category) {
     height: state?.height ? `${state.height}px` : undefined,
   };
 }
+
+function countLabel(count: number | undefined) {
+  return (count ?? 0) > 99 ? "99+" : String(Math.max(count ?? 0, 0));
+}
 </script>
 
 <template>
@@ -538,8 +545,8 @@ function categoryDragStyle(category: Category) {
         tabindex="-1"
         @click="selectCategory('history')"
       >
-        <History class="size-4" />
-        <span>历史</span>
+        <span class="category-count-dot category-count-dot-history">{{ countLabel(historyCount) }}</span>
+        <span class="category-chip-label">{{ t("category.history") }}</span>
       </button>
 
       <div
@@ -561,9 +568,11 @@ function categoryDragStyle(category: Category) {
       >
         <span
           v-if="editingCategoryId !== category.id"
-          class="category-color-dot"
+          class="category-color-dot category-count-dot"
           :style="{ backgroundColor: category.color }"
-        />
+        >
+          {{ countLabel(categoryCounts[category.id]) }}
+        </span>
         <span
           v-if="editingCategoryId !== category.id"
           class="category-chip-label"
@@ -590,7 +599,7 @@ function categoryDragStyle(category: Category) {
         >
           <div class="category-color-popover-title">
             <Palette class="size-3.5" />
-            <span>分类颜色</span>
+            <span>{{ t("category.color") }}</span>
           </div>
           <div class="category-color-grid">
             <button
@@ -600,7 +609,7 @@ function categoryDragStyle(category: Category) {
               class="category-color-swatch"
               :class="{ 'category-color-swatch-active': color.toLowerCase() === category.color.toLowerCase() }"
               :style="{ backgroundColor: color }"
-              :aria-label="`选择颜色 ${color}`"
+              :aria-label="t('category.selectColor', { color })"
               tabindex="-1"
               @click="updateColor(category, color)"
             >
@@ -614,7 +623,7 @@ function categoryDragStyle(category: Category) {
               tabindex="-1"
               @change="updateColor(category, ($event.target as HTMLInputElement).value)"
             />
-            <span>自定义颜色</span>
+            <span>{{ t("category.customColor") }}</span>
           </label>
         </div>
       </div>
@@ -623,7 +632,7 @@ function categoryDragStyle(category: Category) {
     <div class="category-create-wrap flex shrink-0 items-center gap-2">
       <button type="button" class="category-chip category-chip-create" tabindex="-1" @click="emit('create')">
         <Plus class="size-4" />
-        <span>创建分类</span>
+        <span>{{ t("category.create") }}</span>
       </button>
     </div>
 
@@ -636,11 +645,11 @@ function categoryDragStyle(category: Category) {
     >
       <button type="button" class="category-context-item" tabindex="-1" @click="editCategory(categoryMenu.category)">
         <Pencil class="size-3.5" />
-        <span>重命名</span>
+        <span>{{ t("common.rename") }}</span>
       </button>
       <button type="button" class="category-context-item" tabindex="-1" @click="openColorPicker(categoryMenu.category, $event)">
         <Palette class="size-3.5" />
-        <span>修改颜色</span>
+        <span>{{ t("category.changeColor") }}</span>
       </button>
       <div class="context-menu-separator" />
       <button
@@ -651,7 +660,7 @@ function categoryDragStyle(category: Category) {
         @click="requestDeleteCategory(categoryMenu.category.id, { keepMenuOpen: true })"
       >
         <Trash2 class="size-3.5" />
-        <span>{{ pendingDeleteCategoryId === categoryMenu.category.id ? "确认删除" : "删除分类" }}</span>
+        <span>{{ pendingDeleteCategoryId === categoryMenu.category.id ? t("common.confirmDelete") : t("category.delete") }}</span>
       </button>
     </div>
   </section>

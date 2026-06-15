@@ -70,6 +70,8 @@ const OCR_GITHUB_RELEASE_BASE_URL: &str =
 #[cfg(not(target_os = "macos"))]
 const OCR_R2_BASE_URL: &str = env!("IPASTE_OCR_R2_BASE_URL");
 #[cfg(not(target_os = "macos"))]
+const UPDATER_R2_ENDPOINT: &str = env!("IPASTE_UPDATER_R2_ENDPOINT");
+#[cfg(not(target_os = "macos"))]
 const OCR_DIR: &str = "ocr";
 #[cfg(not(target_os = "macos"))]
 const OCR_ASSET_DIR: &str = "assets";
@@ -126,30 +128,31 @@ const DEFAULT_APPEND_COPY_TIMEOUT_MINUTES: i64 = 1;
 const APPEND_COPY_TIMEOUT_OPTIONS: [i64; 4] = [1, 3, 5, 10];
 const DEFAULT_PANEL_OPEN_BEHAVIOR: &str = "history";
 const DEFAULT_PANEL_LAYOUT: &str = "top";
+const DEFAULT_LANGUAGE: &str = "en";
 const CLIP_PAGE_SIZE: usize = 20;
 const IMAGE_DIR: &str = "clip-images";
 const DEFAULT_CLIPBOARD_SEEDS: [(&str, Option<&str>, &str); 6] = [
     (
         "text",
-        Some("欢迎使用 iPaste"),
-        "欢迎使用 iPaste。复制过的文本、链接、颜色和图片会自动保存在本地历史里，方便随时搜索和再次粘贴。",
+        Some("Welcome to iPaste"),
+        "Welcome to iPaste. Copied text, links, colors, and images are saved in local history so you can search and paste them again.",
     ),
     (
         "text",
-        Some("打开面板快捷键"),
-        "快捷键：Command/Ctrl + Shift + V 打开 iPaste 面板。也可以点击托盘图标打开。",
+        Some("Open panel shortcut"),
+        "Press Command/Ctrl + Shift + V to open the iPaste panel, or click the tray icon.",
     ),
     (
         "text",
-        Some("适合长期保存的内容"),
-        "你可以把常用内容收藏到分类里，比如客服回复、地址、邮箱、代码片段、Prompt、发票信息等。",
+        Some("Content worth saving"),
+        "Save reusable content into categories, such as support replies, addresses, emails, code snippets, prompts, or invoice details.",
     ),
-    ("link", Some("iPaste 项目地址"), "https://github.com/iPaste-app/iPaste"),
-    ("color", Some("iPaste 主色"), "#0D9488"),
+    ("link", Some("iPaste project"), "https://github.com/iPaste-app/iPaste"),
+    ("color", Some("iPaste accent color"), "#0D9488"),
     (
         "text",
-        Some("示例 Prompt"),
-        "示例 Prompt：请把下面这段文字改写得更清楚、更简洁，并保留原意。",
+        Some("Example prompt"),
+        "Example prompt: Rewrite the following text to be clearer and more concise while preserving the original meaning.",
     ),
 ];
 
@@ -280,6 +283,7 @@ struct AppSettings {
     panel_open_behavior: String,
     panel_layout: String,
     ocr_mode: String,
+    language: String,
     cloud: CloudSettings,
 }
 
@@ -482,6 +486,8 @@ struct AppState {
     show_menu_item: MenuItem<tauri::Wry>,
     append_copy_menu_item: MenuItem<tauri::Wry>,
     pause_capture_menu_item: MenuItem<tauri::Wry>,
+    settings_menu_item: MenuItem<tauri::Wry>,
+    quit_menu_item: MenuItem<tauri::Wry>,
     append_copy_state: Arc<Mutex<AppendCopyState>>,
     last_clipboard_change_id: Arc<Mutex<Option<u64>>>,
     last_clipboard_hash: Arc<Mutex<Option<String>>>,
@@ -840,6 +846,10 @@ impl Store {
             .setting_value_with_conn(conn, "ocr_mode")?
             .and_then(|value| clean_ocr_mode(value).ok())
             .unwrap_or_else(|| DEFAULT_OCR_MODE.to_string());
+        let language = self
+            .setting_value_with_conn(conn, "language")?
+            .and_then(|value| clean_language(value).ok())
+            .unwrap_or_else(|| DEFAULT_LANGUAGE.to_string());
 
         Ok(AppSettings {
             shortcut,
@@ -848,6 +858,7 @@ impl Store {
             panel_open_behavior,
             panel_layout,
             ocr_mode,
+            language,
             cloud: self.cloud_settings_with_conn(conn)?,
         })
     }
@@ -920,6 +931,18 @@ impl Store {
             "INSERT INTO settings (key, value) VALUES ('ocr_mode', ?1)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![mode],
+        )
+        .map_err(|error| error.to_string())?;
+        self.settings_with_conn(&conn)
+    }
+
+    fn update_language(&self, language: String) -> Result<AppSettings, String> {
+        let language = clean_language(language)?;
+        let conn = self.connect()?;
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('language', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![language],
         )
         .map_err(|error| error.to_string())?;
         self.settings_with_conn(&conn)
@@ -2200,6 +2223,21 @@ fn update_ocr_mode(
 }
 
 #[tauri::command]
+fn update_language(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    language: String,
+) -> Result<AppSettings, String> {
+    let settings = state.store.update_language(language)?;
+    apply_tray_language(&state, &settings.language);
+    if let Some(window) = app.get_webview_window(SETTINGS_WINDOW) {
+        let _ = window.set_title(localized_text(&settings.language, "settings_title"));
+    }
+    emit_settings_changed(&app, &settings);
+    Ok(settings)
+}
+
+#[tauri::command]
 fn update_cloud_settings(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
@@ -2535,6 +2573,7 @@ pub fn run() {
             update_panel_open_behavior,
             update_panel_layout,
             update_ocr_mode,
+            update_language,
             update_cloud_settings,
             disable_cloud_sync,
             test_cloud_settings,
@@ -2565,25 +2604,46 @@ pub fn run() {
             let show_menu_item = MenuItem::with_id(
                 app,
                 "show",
-                "打开 iPaste",
+                localized_text(&settings.language, "open_ipaste"),
                 true,
                 Some(settings.shortcut.as_str()),
             )?;
             let append_copy_menu_item = MenuItem::with_id(
                 app,
                 "append-copy",
-                ENABLE_APPEND_COPY_LABEL,
+                localized_text(&settings.language, "enable_append_copy"),
                 true,
                 None::<&str>,
             )?;
-            let pause_capture_menu_item =
-                MenuItem::with_id(app, "pause", PAUSE_CAPTURE_LABEL, true, None::<&str>)?;
+            let pause_capture_menu_item = MenuItem::with_id(
+                app,
+                "pause",
+                localized_text(&settings.language, "pause_capture"),
+                true,
+                None::<&str>,
+            )?;
+            let settings_menu_item = MenuItem::with_id(
+                app,
+                "settings",
+                localized_text(&settings.language, "settings"),
+                true,
+                None::<&str>,
+            )?;
+            let quit_menu_item = MenuItem::with_id(
+                app,
+                "quit",
+                localized_text(&settings.language, "quit_ipaste"),
+                true,
+                None::<&str>,
+            )?;
             let state = AppState {
                 store: store.clone(),
                 is_listening: Arc::new(Mutex::new(true)),
                 show_menu_item: show_menu_item.clone(),
                 append_copy_menu_item: append_copy_menu_item.clone(),
                 pause_capture_menu_item: pause_capture_menu_item.clone(),
+                settings_menu_item: settings_menu_item.clone(),
+                quit_menu_item: quit_menu_item.clone(),
                 append_copy_state: Arc::new(Mutex::new(AppendCopyState::default())),
                 last_clipboard_change_id: Arc::new(Mutex::new(None)),
                 last_clipboard_hash: Arc::new(Mutex::new(None)),
@@ -2610,6 +2670,9 @@ pub fn run() {
                 show_menu_item,
                 append_copy_menu_item,
                 pause_capture_menu_item,
+                settings_menu_item,
+                quit_menu_item,
+                settings.language.as_str(),
             )?;
             register_app_shortcut(app.handle(), &settings.shortcut)?;
             show_main_window(app.handle(), MainWindowActivation::Activate)?;
@@ -2690,11 +2753,19 @@ pub fn run() {
 }
 
 fn update_pause_capture_menu_label(state: &AppState, is_listening: bool) {
-    let label = if is_listening {
-        PAUSE_CAPTURE_LABEL
-    } else {
-        RESUME_CAPTURE_LABEL
-    };
+    let language = state
+        .store
+        .settings()
+        .map(|settings| settings.language)
+        .unwrap_or_else(|_| DEFAULT_LANGUAGE.to_string());
+    let label = localized_text(
+        &language,
+        if is_listening {
+            "pause_capture"
+        } else {
+            "resume_capture"
+        },
+    );
     let _ = state.pause_capture_menu_item.set_text(label);
 }
 
@@ -2727,26 +2798,34 @@ fn set_append_copy_enabled_inner(
         AppendCopyChanged { is_enabled },
     );
     if let Some(session_id) = timer_session_id {
-        let timeout = Duration::from_secs(
-            state.store.settings()?.append_copy_timeout_minutes.max(1) as u64 * 60,
-        );
+        let settings = state.store.settings()?;
+        let timeout = Duration::from_secs(settings.append_copy_timeout_minutes.max(1) as u64 * 60);
         spawn_append_copy_timeout(
             app.clone(),
             state.append_copy_state.clone(),
             state.append_copy_menu_item.clone(),
             session_id,
             timeout,
+            settings.language,
         );
     }
     Ok(is_enabled)
 }
 
 fn update_append_copy_menu_label(state: &AppState, is_enabled: bool) {
-    let label = if is_enabled {
-        DISABLE_APPEND_COPY_LABEL
-    } else {
-        ENABLE_APPEND_COPY_LABEL
-    };
+    let language = state
+        .store
+        .settings()
+        .map(|settings| settings.language)
+        .unwrap_or_else(|_| DEFAULT_LANGUAGE.to_string());
+    let label = localized_text(
+        &language,
+        if is_enabled {
+            "disable_append_copy"
+        } else {
+            "enable_append_copy"
+        },
+    );
     let _ = state.append_copy_menu_item.set_text(label);
 }
 
@@ -2756,6 +2835,7 @@ fn spawn_append_copy_timeout(
     append_copy_menu_item: MenuItem<tauri::Wry>,
     session_id: String,
     timeout: Duration,
+    language: String,
 ) {
     thread::spawn(move || {
         thread::sleep(timeout);
@@ -2780,7 +2860,7 @@ fn spawn_append_copy_timeout(
             return;
         }
 
-        let _ = append_copy_menu_item.set_text(ENABLE_APPEND_COPY_LABEL);
+        let _ = append_copy_menu_item.set_text(localized_text(&language, "enable_append_copy"));
         let _ = app.emit(
             "ipaste://append-copy-changed",
             AppendCopyChanged { is_enabled: false },
@@ -2793,9 +2873,10 @@ fn build_tray(
     show: MenuItem<tauri::Wry>,
     append_copy: MenuItem<tauri::Wry>,
     pause: MenuItem<tauri::Wry>,
+    settings: MenuItem<tauri::Wry>,
+    quit: MenuItem<tauri::Wry>,
+    language: &str,
 ) -> tauri::Result<()> {
-    let settings = MenuItem::with_id(app, "settings", "设置…", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "退出 iPaste", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(
         app,
@@ -2803,7 +2884,7 @@ fn build_tray(
     )?;
 
     let mut tray = TrayIconBuilder::with_id("ipaste")
-        .tooltip("iPaste 剪贴板管理器")
+        .tooltip(localized_text(language, "tray_tooltip"))
         .menu(&menu)
         .icon_as_template(false)
         .show_menu_on_left_click(false)
@@ -3386,6 +3467,11 @@ fn current_app_bundle_id(app: &tauri::AppHandle) -> Option<String> {
 }
 
 fn show_settings_window(app: &tauri::AppHandle) -> Result<(), String> {
+    let language = app
+        .try_state::<AppState>()
+        .and_then(|state| state.store.settings().ok())
+        .map(|settings| settings.language)
+        .unwrap_or_else(|| DEFAULT_LANGUAGE.to_string());
     let main_monitor = app
         .get_webview_window(MAIN_WINDOW)
         .and_then(|window| window.current_monitor().ok().flatten())
@@ -3399,7 +3485,7 @@ fn show_settings_window(app: &tauri::AppHandle) -> Result<(), String> {
             SETTINGS_WINDOW,
             WebviewUrl::App("index.html?window=settings".into()),
         )
-        .title("iPaste 设置")
+        .title(localized_text(&language, "settings_title"))
         .inner_size(
             SETTINGS_WINDOW_GEOMETRY.width,
             SETTINGS_WINDOW_GEOMETRY.height,
@@ -4248,6 +4334,80 @@ fn clean_ocr_mode(mode: String) -> Result<String, String> {
     }
 }
 
+fn clean_language(language: String) -> Result<String, String> {
+    let language = language.trim();
+    if language == "en" || language == "zh-CN" {
+        Ok(language.to_string())
+    } else {
+        Err("Please choose a valid language".to_string())
+    }
+}
+
+fn localized_text(language: &str, key: &str) -> &'static str {
+    let is_zh = language == "zh-CN";
+    match (is_zh, key) {
+        (true, "open_ipaste") => "打开 iPaste",
+        (false, "open_ipaste") => "Open iPaste",
+        (true, "settings") => "设置...",
+        (false, "settings") => "Settings...",
+        (true, "quit_ipaste") => "退出 iPaste",
+        (false, "quit_ipaste") => "Quit iPaste",
+        (true, "tray_tooltip") => "iPaste 剪贴板管理器",
+        (false, "tray_tooltip") => "iPaste Clipboard Manager",
+        (true, "settings_title") => "iPaste 设置",
+        (false, "settings_title") => "iPaste Settings",
+        (true, "pause_capture") => PAUSE_CAPTURE_LABEL,
+        (false, "pause_capture") => "Pause capture",
+        (true, "resume_capture") => RESUME_CAPTURE_LABEL,
+        (false, "resume_capture") => "Resume capture",
+        (true, "enable_append_copy") => ENABLE_APPEND_COPY_LABEL,
+        (false, "enable_append_copy") => "Enable append copy",
+        (true, "disable_append_copy") => DISABLE_APPEND_COPY_LABEL,
+        (false, "disable_append_copy") => "Disable append copy",
+        _ => "iPaste",
+    }
+}
+
+fn apply_tray_language(state: &AppState, language: &str) {
+    let _ = state
+        .show_menu_item
+        .set_text(localized_text(language, "open_ipaste"));
+    let _ = state
+        .settings_menu_item
+        .set_text(localized_text(language, "settings"));
+    let _ = state
+        .quit_menu_item
+        .set_text(localized_text(language, "quit_ipaste"));
+
+    let is_append_copy_enabled = state
+        .append_copy_state
+        .lock()
+        .map(|append_copy| append_copy.is_enabled)
+        .unwrap_or(false);
+    let _ = state.append_copy_menu_item.set_text(localized_text(
+        language,
+        if is_append_copy_enabled {
+            "disable_append_copy"
+        } else {
+            "enable_append_copy"
+        },
+    ));
+
+    let is_listening = state
+        .is_listening
+        .lock()
+        .map(|listening| *listening)
+        .unwrap_or(true);
+    let _ = state.pause_capture_menu_item.set_text(localized_text(
+        language,
+        if is_listening {
+            "pause_capture"
+        } else {
+            "resume_capture"
+        },
+    ));
+}
+
 fn ensure_unique_ids(ids: &[String]) -> Result<(), String> {
     let mut seen = std::collections::HashSet::new();
     for id in ids {
@@ -4688,10 +4848,13 @@ fn ocr_default_total_bytes(mode: &str) -> u64 {
 #[cfg(not(target_os = "macos"))]
 fn ocr_manifest_urls(mode: &str) -> Vec<String> {
     let mut urls = Vec::new();
-    if let Some(r2_base_url) = normalized_ocr_r2_base_url() {
-        urls.push(ocr_manifest_url_for_base(&r2_base_url, mode));
+    for base_url in ocr_r2_base_urls() {
+        push_unique_url(&mut urls, ocr_manifest_url_for_base(&base_url, mode));
     }
-    urls.push(ocr_manifest_url_for_base(OCR_GITHUB_RELEASE_BASE_URL, mode));
+    push_unique_url(
+        &mut urls,
+        ocr_manifest_url_for_base(OCR_GITHUB_RELEASE_BASE_URL, mode),
+    );
     urls
 }
 
@@ -4709,16 +4872,67 @@ fn ocr_manifest_url_for_base(base_url: &str, mode: &str) -> String {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn normalized_ocr_r2_base_url() -> Option<String> {
-    let base_url = OCR_R2_BASE_URL.trim();
+fn ocr_r2_base_urls() -> Vec<String> {
+    let mut base_urls = Vec::new();
+
+    if let Ok(base_url) = std::env::var("IPASTE_OCR_R2_BASE_URL") {
+        push_optional_base_url(&mut base_urls, normalize_ocr_base_url(&base_url));
+    }
+    push_optional_base_url(&mut base_urls, normalize_ocr_base_url(OCR_R2_BASE_URL));
+
+    if let Ok(endpoint) = std::env::var("IPASTE_UPDATER_R2_ENDPOINT") {
+        push_optional_base_url(&mut base_urls, derive_ocr_r2_base_url(&endpoint));
+    }
+    push_optional_base_url(&mut base_urls, derive_ocr_r2_base_url(UPDATER_R2_ENDPOINT));
+
+    base_urls
+}
+
+#[cfg(not(target_os = "macos"))]
+fn push_optional_base_url(base_urls: &mut Vec<String>, base_url: Option<String>) {
+    if let Some(base_url) = base_url {
+        push_unique_url(base_urls, base_url);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn push_unique_url(urls: &mut Vec<String>, url: String) {
+    if !urls.iter().any(|existing| existing == &url) {
+        urls.push(url);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn normalize_ocr_base_url(base_url: &str) -> Option<String> {
+    let base_url = base_url.trim();
     if base_url.is_empty() || !base_url.starts_with("https://") {
         return None;
     }
+    let base_url = base_url.split(['?', '#']).next().unwrap_or(base_url);
     Some(if base_url.ends_with('/') {
         base_url.to_string()
     } else {
         format!("{base_url}/")
     })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn derive_ocr_r2_base_url(endpoint: &str) -> Option<String> {
+    let endpoint = endpoint.trim();
+    if endpoint.is_empty() || !endpoint.starts_with("https://") {
+        return None;
+    }
+    let endpoint = endpoint
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(endpoint)
+        .trim_end_matches('/');
+    let parent_index = endpoint.rfind('/')?;
+    let parent = &endpoint[..parent_index];
+    if parent.len() <= "https://".len() {
+        return None;
+    }
+    Some(format!("{parent}/ocr/"))
 }
 
 #[cfg(not(target_os = "macos"))]

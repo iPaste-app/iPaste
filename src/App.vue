@@ -9,6 +9,7 @@ import SettingsWindow from "./components/SettingsWindow.vue";
 import TopBar from "./components/TopBar.vue";
 import UpdateDialog from "./components/UpdateDialog.vue";
 import { useUpdater } from "./composables/useUpdater";
+import { t } from "./i18n";
 import { categoryDisplayName, formatShortcut, typeLabel } from "./lib/format";
 import { ipasteApi } from "./lib/ipasteApi";
 import { useIpasteStore } from "./stores/ipasteStore";
@@ -78,7 +79,14 @@ const categoriesByHash = computed(() =>
   }, {}),
 );
 
-const formattedShortcut = computed(() => `${formatShortcut("CommandOrControl+F")} 搜索`);
+const categoryItemCounts = computed(() =>
+  store.categoryItems.reduce<Record<string, number>>((counts, item) => {
+    counts[item.categoryId] = (counts[item.categoryId] ?? 0) + 1;
+    return counts;
+  }, {}),
+);
+
+const formattedShortcut = computed(() => `${formatShortcut("CommandOrControl+F")} ${t("shortcut.search")}`);
 const isSideLayout = computed(() => store.panelLayout === "side");
 const canReorderVisibleItems = computed(() =>
   store.selectedCategoryId !== "history" && !store.search.trim() && store.visibleItems.length > 1,
@@ -160,7 +168,7 @@ watch(
 );
 
 async function createCategory() {
-  const category = await store.createCategory("新建分类");
+  const category = await store.createCategory(t("category.newCategory"));
   editingCategoryId.value = category.id;
 }
 
@@ -188,7 +196,7 @@ async function createCategoryForContextItem() {
   closeFloatingLayers();
   const clipId = item.collection === "history" ? item.id : item.clipSnapshotId;
   const color = CATEGORY_COLORS[store.categories.length % CATEGORY_COLORS.length];
-  const { category, item: categoryItem } = await ipasteApi.createCategoryWithClip("新建分类", color, clipId);
+  const { category, item: categoryItem } = await ipasteApi.createCategoryWithClip(t("category.newCategory"), color, clipId);
   store.categories.push(category);
   store.categoryItems.push(categoryItem);
   store.clips = store.clips.map((clip) =>
@@ -460,8 +468,8 @@ function originalClipId(item: ClipViewItem) {
 
 function contextDeleteLabel(item: ClipViewItem) {
   const isPending = pendingDeleteContextKey.value === contextItemKey(item);
-  if (item.collection === "history") return isPending ? "确认删除" : "删除";
-  return isPending ? "确认移除" : "从分类移除";
+  if (item.collection === "history") return isPending ? t("common.confirmDelete") : t("common.delete");
+  return isPending ? t("context.confirmRemove") : t("context.removeFromCategory");
 }
 
 async function startEditingClipName(item: ClipViewItem) {
@@ -597,7 +605,7 @@ function isEditableTarget(target: EventTarget | null) {
 }
 
 function focusSearch() {
-  const input = document.querySelector<HTMLInputElement>("input[placeholder='搜索剪贴板内容']");
+  const input = document.querySelector<HTMLInputElement>(".search-box input");
   input?.focus();
   input?.select();
 }
@@ -847,6 +855,8 @@ function scrollSelectedClipIntoView() {
           :categories="store.categories"
           :selected-category-id="store.selectedCategoryId"
           :editing-category-id="editingCategoryId"
+          :history-count="store.clipTotalCount"
+          :category-counts="categoryItemCounts"
           :orientation="isSideLayout ? 'vertical' : 'horizontal'"
           @select="store.selectCategory"
           @create="createCategory"
@@ -915,9 +925,9 @@ function scrollSelectedClipIntoView() {
 
             <div v-else class="flex h-full min-h-[360px] flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white/70 text-center">
               <Inbox class="size-10 text-slate-300" />
-              <h2 class="mt-3 text-base font-semibold text-slate-900">这里还没有内容</h2>
+              <h2 class="mt-3 text-base font-semibold text-slate-900">{{ t("empty.title") }}</h2>
               <p class="mt-1 max-w-sm text-sm text-slate-500">
-                在这台设备上复制文本后，它会自动出现在本地历史里。
+                {{ t("empty.description") }}
               </p>
             </div>
           </div>
@@ -937,16 +947,16 @@ function scrollSelectedClipIntoView() {
     >
       <button type="button" class="context-menu-item context-menu-item-strong" tabindex="-1" role="menuitem" @click="pasteContextItem">
         <CornerDownLeft class="size-4" />
-        <span>粘贴</span>
+        <span>{{ t("common.paste") }}</span>
       </button>
       <button type="button" class="context-menu-item" tabindex="-1" role="menuitem" @click="copyContextItem">
         <ClipboardCopy class="size-4" />
-        <span>复制</span>
+        <span>{{ t("common.copy") }}</span>
       </button>
       <div class="context-menu-separator" />
       <button type="button" class="context-menu-item" tabindex="-1" role="menuitem" @click="renameContextItem">
         <Pencil class="size-4" />
-        <span>重命名</span>
+        <span>{{ t("common.rename") }}</span>
       </button>
       <div
         ref="moveSubmenuBranchElement"
@@ -957,7 +967,7 @@ function scrollSelectedClipIntoView() {
       >
         <button type="button" class="context-menu-item" tabindex="-1" role="menuitem" @click.stop="openMoveSubmenu">
           <FolderInput class="size-4" />
-          <span>移动到</span>
+          <span>{{ t("context.moveTo") }}</span>
           <ChevronRight class="ml-auto size-4 text-slate-400" />
         </button>
         <div
@@ -984,7 +994,7 @@ function scrollSelectedClipIntoView() {
           <div v-if="store.categories.length" class="context-menu-separator" />
           <button type="button" class="context-menu-item" tabindex="-1" role="menuitem" @click="createCategoryForContextItem">
             <Plus class="size-4" />
-            <span>创建分类...</span>
+            <span>{{ t("context.createCategory") }}</span>
           </button>
         </div>
       </div>

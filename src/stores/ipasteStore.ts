@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
+import { cleanLanguage, setLanguage } from "../i18n";
 import { ipasteApi } from "../lib/ipasteApi";
 import type {
   AppendCopyChangedEvent,
@@ -12,6 +13,7 @@ import type {
   ClipViewItem,
   CloudSettings,
   ListeningChangedEvent,
+  Language,
   OcrMode,
   PanelLayout,
   PanelOpenBehavior,
@@ -24,6 +26,7 @@ const DEFAULT_APPEND_COPY_TIMEOUT_MINUTES = 1;
 const APPEND_COPY_TIMEOUT_OPTIONS = [1, 3, 5, 10];
 const DEFAULT_PANEL_LAYOUT: PanelLayout = "top";
 const DEFAULT_OCR_MODE: OcrMode = "fast";
+const DEFAULT_LANGUAGE: Language = "en";
 const CLIP_PAGE_SIZE = 20;
 const isTauri = "__TAURI_INTERNALS__" in window;
 
@@ -48,6 +51,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
   const panelOpenBehavior = ref<PanelOpenBehavior>("history");
   const panelLayout = ref<PanelLayout>(DEFAULT_PANEL_LAYOUT);
   const ocrMode = ref<OcrMode>(DEFAULT_OCR_MODE);
+  const language = ref<Language>(DEFAULT_LANGUAGE);
   const cloud = ref<CloudSettings>({
     apiAddress: "",
     apiKey: "",
@@ -77,7 +81,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
         item.displayName ?? "",
         item.previewText,
         item.clipType,
-        item.clipType === "image" ? "图片 image" : item.text,
+        item.clipType === "image" ? "image" : item.text,
       ].some((value) => value.toLowerCase().includes(query)),
     );
   });
@@ -104,6 +108,8 @@ export const useIpasteStore = defineStore("ipaste", () => {
       panelOpenBehavior.value = snapshot.settings.panelOpenBehavior;
       panelLayout.value = cleanPanelLayout(snapshot.settings.panelLayout);
       ocrMode.value = cleanOcrMode(snapshot.settings.ocrMode);
+      language.value = cleanLanguage(snapshot.settings.language);
+      setLanguage(language.value);
       cloud.value = snapshot.settings.cloud;
 
       if (!categories.value.some((category) => category.id === selectedCategoryId.value)) {
@@ -432,6 +438,25 @@ export const useIpasteStore = defineStore("ipaste", () => {
     }
   }
 
+  async function updateLanguage(value: Language) {
+    const nextLanguage = cleanLanguage(value);
+    language.value = nextLanguage;
+    setLanguage(nextLanguage);
+
+    try {
+      const settings = await ipasteApi.updateLanguage(nextLanguage);
+      applySettings(settings);
+    } catch (unknownError) {
+      const message = String(unknownError);
+      if (message.includes("update_language") && message.includes("not found")) {
+        return;
+      }
+
+      error.value = message;
+      throw unknownError;
+    }
+  }
+
   async function saveCloudSettings(apiAddress: string, apiKey: string) {
     const settings = await ipasteApi.updateCloudSettings(apiAddress, apiKey);
     applySettings(settings);
@@ -486,6 +511,8 @@ export const useIpasteStore = defineStore("ipaste", () => {
     panelOpenBehavior.value = snapshot.settings.panelOpenBehavior;
     panelLayout.value = cleanPanelLayout(snapshot.settings.panelLayout);
     ocrMode.value = cleanOcrMode(snapshot.settings.ocrMode);
+    language.value = cleanLanguage(snapshot.settings.language);
+    setLanguage(language.value);
     cloud.value = snapshot.settings.cloud;
     clampSelection();
   }
@@ -503,6 +530,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
     panelOpenBehavior: PanelOpenBehavior;
     panelLayout?: PanelLayout;
     ocrMode?: OcrMode;
+    language?: Language;
     cloud: CloudSettings;
   }) {
     shortcut.value = settings.shortcut;
@@ -511,6 +539,8 @@ export const useIpasteStore = defineStore("ipaste", () => {
     panelOpenBehavior.value = settings.panelOpenBehavior;
     panelLayout.value = cleanPanelLayout(settings.panelLayout);
     ocrMode.value = cleanOcrMode(settings.ocrMode);
+    language.value = cleanLanguage(settings.language);
+    setLanguage(language.value);
     cloud.value = settings.cloud;
   }
 
@@ -616,7 +646,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
       clip.displayName ?? "",
       clip.previewText,
       clip.clipType,
-      clip.clipType === "image" ? "图片 image" : clip.text,
+      clip.clipType === "image" ? "image" : clip.text,
     ].some((text) => text.toLowerCase().includes(query));
   }
 
@@ -690,6 +720,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
     panelOpenBehavior,
     panelLayout,
     ocrMode,
+    language,
     cloud,
     activeCategory,
     visibleItems,
@@ -723,6 +754,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
     updatePanelOpenBehavior,
     updatePanelLayout,
     updateOcrMode,
+    updateLanguage,
     saveCloudSettings,
     disableCloudSync,
     testCloudSettings,

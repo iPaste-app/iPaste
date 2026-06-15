@@ -2,6 +2,7 @@
 import { Clipboard, Info, Link } from "lucide-vue-next";
 import { computed } from "vue";
 import { clipImageSrc } from "../lib/clipMedia";
+import { t } from "../i18n";
 import { formatTime, textStats, typeLabel } from "../lib/format";
 import type { ClipViewItem } from "../types";
 
@@ -14,7 +15,7 @@ const isImage = computed(() => props.item?.clipType === "image");
 const imageSrc = computed(() => props.item ? clipImageSrc(props.item) : "");
 const detailTitle = computed(() => {
   if (!props.item) return "";
-  return props.item.displayName?.trim() || `${typeLabel(props.item.clipType)}剪贴板`;
+  return props.item.displayName?.trim() || t("clip.clipboardTitle", { type: typeLabel(props.item.clipType) });
 });
 const displayTime = computed(() => {
   if (!props.item) return "";
@@ -28,7 +29,7 @@ const displayTime = computed(() => {
       <div class="border-b border-slate-200 p-4">
         <div class="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">
           <Info class="size-3.5" />
-          详情
+          {{ t("detail.title") }}
         </div>
         <h2 class="mt-2 truncate text-base font-semibold text-slate-950">
           {{ detailTitle }}
@@ -58,7 +59,7 @@ const displayTime = computed(() => {
           v-if="isImage"
           class="mb-4 overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
         >
-          <img class="max-h-[360px] w-full object-contain" :src="imageSrc" alt="图片剪贴板预览" />
+          <img class="max-h-[360px] w-full object-contain" :src="imageSrc" :alt="t('common.imagePreviewAlt')" />
         </div>
 
         <pre
@@ -68,11 +69,11 @@ const displayTime = computed(() => {
 
         <dl class="mt-4 grid grid-cols-2 gap-3 text-sm text-slate-400">
           <div>
-            <dt class="text-xs text-slate-400">大小</dt>
+            <dt class="text-xs text-slate-400">{{ t("common.size") }}</dt>
             <dd class="mt-1 text-slate-500">{{ isImage ? item.previewText : textStats(item.text) }}</dd>
           </div>
           <div v-if="!isImage">
-            <dt class="text-xs text-slate-400">行数</dt>
+            <dt class="text-xs text-slate-400">{{ t("common.lines") }}</dt>
             <dd class="mt-1 text-slate-500">{{ lines }}</dd>
           </div>
         </dl>
@@ -81,7 +82,7 @@ const displayTime = computed(() => {
 
     <div v-else class="flex h-full flex-col items-center justify-center gap-3 px-8 text-center text-slate-400">
       <Clipboard class="size-8" />
-      <p class="text-sm">未选择剪贴板内容</p>
+      <p class="text-sm">{{ t("detail.noSelection") }}</p>
     </div>
   </aside>
 </template>

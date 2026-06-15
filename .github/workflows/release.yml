@@ -97,6 +97,7 @@ jobs:
       contents: read
     env:
       IPASTE_UPDATER_R2_ENDPOINT: ${{ secrets.IPASTE_UPDATER_R2_ENDPOINT }}
+      IPASTE_OCR_R2_BASE_URL: ${{ secrets.IPASTE_OCR_R2_BASE_URL }}
 
     steps:
       - name: Checkout

@@ -1,6 +1,5 @@
 import type { ClipType } from "../types";
-
-const relativeFormatter = new Intl.RelativeTimeFormat("zh-CN", { numeric: "auto" });
+import { currentLocale, t } from "../i18n";
 
 export function formatShortcut(shortcut: string) {
   return shortcut
@@ -13,8 +12,10 @@ export function formatTime(value: string) {
   const timestamp = new Date(value).getTime();
   const delta = timestamp - Date.now();
   const minutes = Math.round(delta / 60_000);
+  const locale = currentLocale.value;
+  const relativeFormatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
 
-  if (Math.abs(minutes) < 1) return "刚刚";
+  if (Math.abs(minutes) < 1) return t("time.justNow");
   if (Math.abs(minutes) < 60) return relativeFormatter.format(minutes, "minute");
 
   const hours = Math.round(minutes / 60);
@@ -23,23 +24,23 @@ export function formatTime(value: string) {
   const days = Math.round(hours / 24);
   if (Math.abs(days) < 7) return relativeFormatter.format(days, "day");
 
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat(locale, {
     month: "short",
     day: "numeric",
   }).format(new Date(value));
 }
 
 export function typeLabel(type: ClipType) {
-  const labels: Record<ClipType, string> = {
-    text: "文本",
-    link: "链接",
-    color: "颜色",
-    image: "图片",
-    file: "文件",
-    html: "HTML",
+  const labels: Record<ClipType, ReturnType<typeof t>> = {
+    text: t("type.text"),
+    link: t("type.link"),
+    color: t("type.color"),
+    image: t("type.image"),
+    file: t("type.file"),
+    html: t("type.html"),
   };
 
-  return labels[type] ?? "文本";
+  return labels[type] ?? t("type.text");
 }
 
 export function textStats(text: string) {
@@ -47,25 +48,26 @@ export function textStats(text: string) {
   const words = text.trim() ? text.trim().split(/\s+/).length : 0;
   const hasCjk = /[\u4E00-\u9FFF]/.test(text);
 
-  if (chars > 999) return `${(chars / 1000).toFixed(1)} 千字符`;
-  if (!hasCjk && words > 1 && /[A-Za-z0-9]/.test(text)) return `${words} 词`;
-  return `${chars} 字符`;
+  if (chars > 999) return t("stats.kChars", { value: (chars / 1000).toFixed(1) });
+  if (!hasCjk && words > 1 && /[A-Za-z0-9]/.test(text)) return t("stats.words", { value: words });
+  return t("stats.chars", { value: chars });
 }
 
 export function syncStateLabel(value: string) {
   const labels: Record<string, string> = {
-    local: "本地",
-    syncing: "同步中",
-    synced: "已同步",
-    conflict: "冲突",
+    local: t("sync.local"),
+    syncing: t("sync.syncing"),
+    synced: t("sync.synced"),
+    conflict: t("sync.conflict"),
   };
 
-  return labels[value] ?? "本地";
+  return labels[value] ?? t("sync.local");
 }
 
 export function categoryDisplayName(name: string) {
   const labels: Record<string, string> = {
-    "Dev Snippets": "开发片段",
+    "Dev Snippets": t("category.devSnippets"),
+    "开发片段": t("category.devSnippets"),
   };
 
   return labels[name] ?? name;

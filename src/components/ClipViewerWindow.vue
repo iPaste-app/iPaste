@@ -22,6 +22,7 @@ import {
 } from "lucide-vue-next";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { clipImageSrc } from "../lib/clipMedia";
+import { t } from "../i18n";
 import { clipViewerStorageKey, ipasteApi } from "../lib/ipasteApi";
 import { formatTime, textStats, typeLabel } from "../lib/format";
 import type { ClipUpdatedEvent, ClipViewerPayload, ImageOcrResult, ImageOcrWord } from "../types";
@@ -108,8 +109,8 @@ const IMAGE_ZOOM_STEP = 1.2;
 const item = computed(() => payload.value?.item);
 const title = computed(() => {
   const current = item.value;
-  if (!current) return "放大查看";
-  return current.displayName?.trim() || `${typeLabel(current.clipType)}剪贴板`;
+  if (!current) return t("viewer.titleFallback");
+  return current.displayName?.trim() || t("clip.clipboardTitle", { type: typeLabel(current.clipType) });
 });
 const isImage = computed(() => item.value?.clipType === "image");
 const imageSrc = computed(() => (item.value ? clipImageSrc(item.value) : ""));
@@ -160,10 +161,13 @@ const ocrTextLayerStyle = computed(() => {
 });
 const imageOcrSummary = computed(() => {
   if (!imageOcrResult.value) return "";
-  return `${imageOcrResult.value.words.length} 个词 · ${imageOcrResult.value.language}`;
+  return t("viewer.ocrSummary", {
+    count: imageOcrResult.value.words.length,
+    language: imageOcrResult.value.language,
+  });
 });
 const imageOcrLoadingText = computed(() =>
-  isMacOs ? "系统正在识别图片文字，稍等一下。" : "Tesseract 正在处理，稍等一下。",
+  isMacOs ? t("viewer.ocrLoading.macos") : t("viewer.ocrLoading.tesseract"),
 );
 const imageOcrLines = computed<OcrLine[]>(() => {
   const words = imageOcrResult.value?.words ?? [];
@@ -310,14 +314,14 @@ watch(imageSrc, () => {
 function loadPayload() {
   const label = new URLSearchParams(window.location.search).get("label");
   if (!label) {
-    error.value = "未找到放大窗口数据";
+    error.value = t("viewer.payloadMissing");
     return;
   }
   windowLabel.value = label;
 
   const raw = localStorage.getItem(clipViewerStorageKey(label));
   if (!raw) {
-    error.value = "放大窗口数据已失效";
+    error.value = t("viewer.payloadExpired");
     return;
   }
 
@@ -325,7 +329,7 @@ function loadPayload() {
     payload.value = JSON.parse(raw) as ClipViewerPayload;
     draftText.value = payload.value.item.text;
   } catch {
-    error.value = "无法读取放大窗口数据";
+    error.value = t("viewer.payloadInvalid");
   }
 }
 
@@ -1141,8 +1145,8 @@ function clamp(value: number, min: number, max: number) {
         type="button"
         class="viewer-icon-button"
         :class="{ 'viewer-icon-button-active': isPinned }"
-        :aria-label="isPinned ? '取消置顶' : '置顶窗口'"
-        :data-tooltip="isPinned ? '取消置顶' : '置顶窗口'"
+        :aria-label="isPinned ? t('viewer.unpin') : t('viewer.pin')"
+        :data-tooltip="isPinned ? t('viewer.unpin') : t('viewer.pin')"
         @click="togglePinned"
       >
         <PinOff v-if="isPinned" class="size-4" />
@@ -1156,13 +1160,13 @@ function clamp(value: number, min: number, max: number) {
         </p>
       </div>
 
-      <div v-if="isImage" class="viewer-image-toolbox" role="toolbar" aria-label="图片预览工具" @pointerdown.stop @wheel.stop>
+      <div v-if="isImage" class="viewer-image-toolbox" role="toolbar" :aria-label="t('viewer.imageToolbar')" @pointerdown.stop @wheel.stop>
         <button
           type="button"
           class="viewer-icon-button"
           :disabled="!canZoomOutImage"
-          aria-label="缩小图片"
-          data-tooltip="缩小"
+          :aria-label="t('viewer.zoomOut')"
+          :data-tooltip="t('viewer.zoomOut')"
           @click="zoomImageOut"
         >
           <ZoomOut class="size-4" />
@@ -1171,8 +1175,8 @@ function clamp(value: number, min: number, max: number) {
           type="button"
           class="viewer-icon-button"
           :disabled="!canZoomInImage"
-          aria-label="放大图片"
-          data-tooltip="放大"
+          :aria-label="t('viewer.zoomIn')"
+          :data-tooltip="t('viewer.zoomIn')"
           @click="zoomImageIn"
         >
           <ZoomIn class="size-4" />
@@ -1181,8 +1185,8 @@ function clamp(value: number, min: number, max: number) {
           type="button"
           class="viewer-icon-button"
           :class="{ 'viewer-icon-button-active': isImageActualSize }"
-          aria-label="以原始大小显示图片"
-          data-tooltip="原始大小"
+          :aria-label="t('viewer.actualSize')"
+          :data-tooltip="t('viewer.actualSize')"
           @click="showImageActualSize"
         >
           <Maximize2 class="size-4" />
@@ -1190,8 +1194,8 @@ function clamp(value: number, min: number, max: number) {
         <button
           type="button"
           class="viewer-icon-button"
-          aria-label="顺时针旋转图片"
-          data-tooltip="旋转"
+          :aria-label="t('viewer.rotateClockwise')"
+          :data-tooltip="t('viewer.rotateClockwise')"
           @click="rotateImageClockwise"
         >
           <RotateCw class="size-4" />
@@ -1199,8 +1203,8 @@ function clamp(value: number, min: number, max: number) {
         <button
           type="button"
           class="viewer-image-zoom-label"
-          aria-label="恢复 100% 大小"
-          data-tooltip="恢复 100%"
+          :aria-label="t('viewer.restore100')"
+          :data-tooltip="t('viewer.restore100')"
           @click="showImageActualSize"
         >
           {{ imageZoomLabel }}
@@ -1210,8 +1214,8 @@ function clamp(value: number, min: number, max: number) {
           class="viewer-icon-button"
           :class="{ 'viewer-icon-button-active': Boolean(imageOcrResult) }"
           :disabled="isRecognizingImage"
-          aria-label="识别图片文字"
-          data-tooltip="识别文字"
+          :aria-label="t('viewer.recognizeText')"
+          :data-tooltip="t('viewer.recognizeText')"
           @click="recognizeImageText"
         >
           <LoaderCircle v-if="isRecognizingImage" class="size-4 update-spin" />
@@ -1227,7 +1231,7 @@ function clamp(value: number, min: number, max: number) {
         @click="resetDraft"
       >
         <RotateCcw class="size-4" />
-        <span>还原</span>
+        <span>{{ t("viewer.reset") }}</span>
       </button>
 
       <button
@@ -1238,10 +1242,10 @@ function clamp(value: number, min: number, max: number) {
         @click="applyChanges"
       >
         <Save class="size-4" />
-        <span>应用修改</span>
+        <span>{{ t("viewer.applyChanges") }}</span>
       </button>
 
-      <button type="button" class="viewer-icon-button" aria-label="关闭窗口" data-tooltip="关闭窗口" @click="closeWindow">
+      <button type="button" class="viewer-icon-button" :aria-label="t('viewer.closeWindow')" :data-tooltip="t('viewer.closeWindow')" @click="closeWindow">
         <X class="size-4" />
       </button>
     </header>
@@ -1276,7 +1280,7 @@ function clamp(value: number, min: number, max: number) {
               :src="imageSrc"
               :style="imageStyle"
               draggable="false"
-              alt="图片剪贴板预览"
+              :alt="t('common.imagePreviewAlt')"
               @load="handleImageLoad"
             />
             <div
@@ -1346,8 +1350,8 @@ function clamp(value: number, min: number, max: number) {
             <button
               type="button"
               class="viewer-image-ocr-toggle"
-              :aria-label="isImageOcrPanelCollapsed ? '展开 OCR 文本' : '收起 OCR 文本'"
-              :data-tooltip="isImageOcrPanelCollapsed ? '展开 OCR 文本' : '收起 OCR 文本'"
+              :aria-label="isImageOcrPanelCollapsed ? t('viewer.expandOcr') : t('viewer.collapseOcr')"
+              :data-tooltip="isImageOcrPanelCollapsed ? t('viewer.expandOcr') : t('viewer.collapseOcr')"
               @pointerdown.stop
               @click="toggleImageOcrPanel"
             >
@@ -1358,10 +1362,10 @@ function clamp(value: number, min: number, max: number) {
             <div class="viewer-image-ocr-panel-body" @pointerdown.stop @wheel.stop>
               <div class="viewer-image-ocr-heading">
                 <div class="min-w-0">
-                  <h2>OCR 识别</h2>
+                  <h2>{{ t("viewer.ocrTitle") }}</h2>
                   <p v-if="imageOcrResult">{{ imageOcrSummary }}</p>
-                  <p v-else-if="isRecognizingImage">正在识别图片文字</p>
-                  <p v-else>识别失败</p>
+                  <p v-else-if="isRecognizingImage">{{ t("viewer.ocrRecognizing") }}</p>
+                  <p v-else>{{ t("viewer.ocrFailed") }}</p>
                 </div>
                 <button
                   v-if="imageOcrResult?.text"
@@ -1370,7 +1374,7 @@ function clamp(value: number, min: number, max: number) {
                   @click="pasteImageOcrText"
                 >
                   <Copy class="size-4" />
-                  <span>复制文本</span>
+                  <span>{{ t("viewer.copyText") }}</span>
                 </button>
               </div>
 
@@ -1411,35 +1415,35 @@ function clamp(value: number, min: number, max: number) {
       >
         <Copy v-if="selectionAction.mode === 'copy'" class="size-3.5" />
         <ClipboardPaste v-else class="size-3.5" />
-        <span>{{ selectionAction.mode === "copy" ? "复制选区" : "粘贴选区" }}</span>
+        <span>{{ selectionAction.mode === "copy" ? t("viewer.copySelection") : t("viewer.pasteSelection") }}</span>
       </button>
     </section>
 
     <footer v-if="item" class="clip-viewer-footer">
       <span>{{ isImage ? item.previewText : stats }}</span>
-      <span v-if="!isImage">{{ lines }} 行</span>
+      <span v-if="!isImage">{{ t("common.lineCount", { count: lines }) }}</span>
       <button type="button" class="viewer-paste-button" @click="pasteDraft">
         <ImageIcon v-if="isImage" class="size-4" />
         <CornerDownLeft v-else class="size-4" />
-        <span>{{ isImage ? "粘贴图片" : "粘贴当前内容" }}</span>
+        <span>{{ isImage ? t("viewer.pasteImage") : t("viewer.pasteCurrent") }}</span>
       </button>
     </footer>
 
     <div v-if="showClosePrompt" class="viewer-close-backdrop" @mousedown.self="cancelClose">
       <section class="viewer-close-dialog" role="alertdialog" aria-modal="true" aria-labelledby="viewer-close-title">
-        <h2 id="viewer-close-title">保存修改？</h2>
-        <p>放大窗口里的内容已经修改，关闭前可以先保存到这条记录。</p>
+        <h2 id="viewer-close-title">{{ t("viewer.saveChangesTitle") }}</h2>
+        <p>{{ t("viewer.saveChangesDescription") }}</p>
         <div class="viewer-close-actions">
           <button type="button" class="viewer-action-button" :disabled="isSavingBeforeClose" @click="cancelClose">
-            <span>取消</span>
+            <span>{{ t("common.cancel") }}</span>
           </button>
           <button type="button" class="viewer-action-button viewer-action-button-danger" :disabled="isSavingBeforeClose" @click="discardAndClose">
             <X class="size-4" />
-            <span>不保存</span>
+            <span>{{ t("viewer.discard") }}</span>
           </button>
           <button type="button" class="viewer-action-button viewer-action-button-primary" :disabled="isSavingBeforeClose" @click="saveAndClose">
             <Save class="size-4" />
-            <span>{{ isSavingBeforeClose ? "保存中" : "保存并关闭" }}</span>
+            <span>{{ isSavingBeforeClose ? t("common.saving") : t("viewer.saveAndClose") }}</span>
           </button>
         </div>
       </section>

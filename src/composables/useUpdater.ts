@@ -1,6 +1,7 @@
 import { computed, ref, shallowRef } from "vue";
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { t } from "../i18n";
 
 export type UpdateStatus = "idle" | "checking" | "noUpdate" | "available" | "downloading" | "ready" | "error";
 export type UpdateErrorPhase = "check" | "install" | "relaunch";
@@ -29,22 +30,22 @@ export function useUpdater() {
   const isUpdateBusy = computed(() => updateStatus.value === "checking" || updateStatus.value === "downloading");
 
   const updateButtonText = computed(() => {
-    if (updateStatus.value === "checking") return "检查中";
-    if (updateStatus.value === "downloading") return "更新中";
-    if (updateStatus.value === "ready") return "等待重启";
-    return "检查更新";
+    if (updateStatus.value === "checking") return t("update.button.checking");
+    if (updateStatus.value === "downloading") return t("update.button.downloading");
+    if (updateStatus.value === "ready") return t("update.button.ready");
+    return t("update.button.idle");
   });
 
   const updateSummaryText = computed(() => {
-    if (updateStatus.value === "checking") return "正在检查更新。";
-    if (updateStatus.value === "noUpdate") return "已是最新版。";
+    if (updateStatus.value === "checking") return t("update.summary.checking");
+    if (updateStatus.value === "noUpdate") return t("update.summary.noUpdate");
     if (updateStatus.value === "available" && availableUpdate.value) {
-      return `新版本 ${availableUpdate.value.version} 可用。`;
+      return t("update.summary.available", { version: availableUpdate.value.version });
     }
-    if (updateStatus.value === "downloading") return "正在更新。";
-    if (updateStatus.value === "ready") return "更新已安装，重启后生效。";
+    if (updateStatus.value === "downloading") return t("update.summary.downloading");
+    if (updateStatus.value === "ready") return t("update.summary.ready");
     if (updateStatus.value === "error") return updateError.value ?? getFallbackErrorText(updateErrorPhase.value);
-    return "检查是否有可用更新。";
+    return t("update.summary.idle");
   });
 
   async function checkForUpdate(options: CheckForUpdateOptions = {}) {
@@ -60,7 +61,7 @@ export function useUpdater() {
 
     try {
       if (!isTauri) {
-        throw new Error("请在桌面应用中检查更新。");
+        throw new Error(t("update.error.desktopOnly"));
       }
 
       const nextUpdate = await check({ timeout: UPDATE_CHECK_TIMEOUT_MS });
@@ -179,30 +180,30 @@ export function normalizeUpdateError(error: unknown, phase: UpdateErrorPhase = "
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
 
-  if (normalized.includes("请在桌面应用中检查更新")) {
-    return "请在桌面应用中检查更新。";
+  if (normalized.includes("请在桌面应用中检查更新") || normalized.includes("check for updates in the desktop app")) {
+    return t("update.error.desktopOnly");
   }
 
   if (normalized.includes("signature") || normalized.includes("verify")) {
-    return "更新包校验失败，请稍后重试或重新下载安装包。";
+    return t("update.error.signature");
   }
 
   if (normalized.includes("invalid updater binary format") || normalized.includes("binary for the current target")) {
-    return "更新包格式不正确，请重新发布安装包后重试。";
+    return t("update.error.invalidPackage");
   }
 
   if (normalized.includes("permission denied") || normalized.includes("access is denied")) {
     return phase === "install"
-      ? "无法写入或启动更新安装包，请退出 iPaste 后重新尝试。"
-      : "权限不足，请退出 iPaste 后重新尝试。";
+      ? t("update.error.installPermission")
+      : t("update.error.permission");
   }
 
   if (normalized.includes("failed to install") || normalized.includes("packageinstallfailed")) {
-    return "更新包下载完成，但安装失败。请退出 iPaste 后重新启动应用再试。";
+    return t("update.error.installFailed");
   }
 
   if (normalized.includes("404") || normalized.includes("not found")) {
-    return "暂时无法获取更新信息，请稍后重试。";
+    return t("update.error.notFound");
   }
 
   if (
@@ -215,17 +216,17 @@ export function normalizeUpdateError(error: unknown, phase: UpdateErrorPhase = "
     normalized.includes("error sending request")
   ) {
     return phase === "install"
-      ? "暂时无法下载更新包，请确认网络连接后重试。"
-      : "暂时无法检查更新，请确认网络连接后重试。";
+      ? t("update.error.downloadNetwork")
+      : t("update.error.checkNetwork");
   }
 
   return getFallbackErrorText(phase);
 }
 
 function getFallbackErrorText(phase: UpdateErrorPhase) {
-  if (phase === "install") return "无法下载或安装更新，请稍后重试。";
-  if (phase === "relaunch") return "更新已安装，但无法自动重启。请手动重启 iPaste。";
-  return "无法检查更新，请稍后重试。";
+  if (phase === "install") return t("update.error.installFallback");
+  if (phase === "relaunch") return t("update.error.relaunchFallback");
+  return t("update.error.checkFallback");
 }
 
 export function cleanUpdateNotes(notes: string | undefined | null) {

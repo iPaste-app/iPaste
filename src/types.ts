@@ -46,6 +46,7 @@ export type CategoryWithItem = {
 export type PanelOpenBehavior = "history" | "last_selected";
 export type PanelLayout = "top" | "side";
 export type OcrMode = "fast" | "best";
+export type Language = "en" | "zh-CN";
 
 export type AppSnapshot = {
   clips: ClipItem[];
@@ -73,6 +74,7 @@ export type AppSettings = {
   panelOpenBehavior: PanelOpenBehavior;
   panelLayout: PanelLayout;
   ocrMode: OcrMode;
+  language: Language;
   cloud: CloudSettings;
 };
 

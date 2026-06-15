@@ -33,15 +33,16 @@ import {
 } from "lucide-vue-next";
 import UpdateDialog from "./UpdateDialog.vue";
 import { useUpdater } from "../composables/useUpdater";
+import { languageOptions, t } from "../i18n";
 import { ipasteApi } from "../lib/ipasteApi";
 import { formatShortcut } from "../lib/format";
 import { useIpasteStore } from "../stores/ipasteStore";
-import type { AppInfo, OcrInstallProgress, OcrInstallStatus, OcrMode, PanelLayout, PanelOpenBehavior } from "../types";
+import type { AppInfo, Language, OcrInstallProgress, OcrInstallStatus, OcrMode, PanelLayout, PanelOpenBehavior } from "../types";
 
 const store = useIpasteStore();
 const DEFAULT_SHORTCUT = "CommandOrControl+Shift+V";
-type SettingsTab = "preferences" | "dataManagement" | "permissions" | "about";
-const activeTab = ref<SettingsTab>("preferences");
+type SettingsTab = "general" | "shortcuts" | "ocr" | "dataManagement" | "permissions" | "about";
+const activeTab = ref<SettingsTab>("general");
 const showPermissionGuide = ref(false);
 const shortcutDraft = ref(DEFAULT_SHORTCUT);
 const shortcutRecording = ref(false);
@@ -67,12 +68,12 @@ let unlistenOcrProgress: UnlistenFn | null = null;
 let shouldRestoreAppShortcutAfterRecording = false;
 const updater = useUpdater();
 
-const retentionOptions = [
-  { label: "7 天", value: 7 },
-  { label: "14 天", value: 14 },
-  { label: "1 个月", value: 30 },
-  { label: "3 个月", value: 90 },
-];
+const retentionOptions = computed(() => [
+  { label: t("settings.retention.7"), value: 7 },
+  { label: t("settings.retention.14"), value: 14 },
+  { label: t("settings.retention.30"), value: 30 },
+  { label: t("settings.retention.90"), value: 90 },
+]);
 
 const appendCopyTimeoutOptions = [
   { label: "1", value: 1 },
@@ -81,83 +82,88 @@ const appendCopyTimeoutOptions = [
   { label: "10", value: 10 },
 ];
 
-const panelOpenOptions: Array<{ label: string; value: PanelOpenBehavior; icon: typeof History }> = [
-  { label: "历史记录", value: "history", icon: History },
-  { label: "上次选中", value: "last_selected", icon: Tags },
-];
+const panelOpenOptions = computed<Array<{ label: string; value: PanelOpenBehavior; icon: typeof History }>>(() => [
+  { label: t("settings.panelOpen.history"), value: "history", icon: History },
+  { label: t("settings.panelOpen.lastSelected"), value: "last_selected", icon: Tags },
+]);
 
-const panelLayoutOptions: Array<{ label: string; value: PanelLayout }> = [
-  { label: "上下布局", value: "top" },
-  { label: "左右布局", value: "side" },
-];
+const panelLayoutOptions = computed<Array<{ label: string; value: PanelLayout }>>(() => [
+  { label: t("settings.layout.top"), value: "top" },
+  { label: t("settings.layout.side"), value: "side" },
+]);
 
-const ocrModeOptions: Array<{ label: string; value: OcrMode; description: string; totalBytes: number }> = [
+const ocrModeOptions = computed<Array<{ label: string; value: OcrMode; description: string; totalBytes: number }>>(() => [
   {
     label: "Fast",
     value: "fast",
-    description: "体积小、下载快，适合清晰截图和日常图片，识别速度更快。",
+    description: t("ocr.mode.fast.description"),
     totalBytes: 37_557_099,
   },
   {
     label: "Best",
     value: "best",
-    description: "体积更大、速度略慢，对复杂图片和中英文混排更稳。",
+    description: t("ocr.mode.best.description"),
     totalBytes: 59_452_879,
   },
-];
+]);
 
 const tabs = computed(() => {
   const items: Array<{ id: SettingsTab; label: string; icon: typeof SlidersHorizontal }> = [
-    { id: "preferences", label: "偏好", icon: SlidersHorizontal },
-    { id: "dataManagement", label: "数据管理", icon: Database },
-    { id: "about", label: "关于", icon: Sparkles },
+    { id: "general", label: t("settings.tabs.general"), icon: SlidersHorizontal },
+    { id: "shortcuts", label: t("settings.tabs.shortcuts"), icon: Keyboard },
+    { id: "dataManagement", label: t("settings.tabs.dataManagement"), icon: Database },
+    { id: "about", label: t("settings.tabs.about"), icon: Sparkles },
   ];
 
+  if (!isMacOs) {
+    items.splice(2, 0, { id: "ocr", label: t("settings.tabs.ocr"), icon: ScanText });
+  }
+
   if (isMacOs) {
-    items.splice(2, 0, { id: "permissions", label: "权限", icon: ShieldCheck });
+    items.splice(3, 0, { id: "permissions", label: t("settings.tabs.permissions"), icon: ShieldCheck });
   }
 
   return items;
 });
 
-const techStack = [
-  { name: "Vue 3", detail: "前端界面", icon: Blocks, tone: "emerald" },
-  { name: "TypeScript", detail: "类型系统", icon: SquareCode, tone: "blue" },
-  { name: "Tauri 2", detail: "桌面应用框架", icon: AppWindow, tone: "teal" },
-  { name: "Rust", detail: "原生能力与数据层", icon: Cpu, tone: "slate" },
-  { name: "Pinia", detail: "状态管理", icon: Box, tone: "amber" },
-  { name: "Tailwind CSS", detail: "界面样式", icon: Brush, tone: "sky" },
-  { name: "Vite", detail: "构建工具", icon: Zap, tone: "violet" },
-  { name: "SQLite", detail: "本地存储", icon: Database, tone: "indigo" },
-];
+const techStack = computed(() => [
+  { name: "Vue 3", detail: t("settings.tech.vue"), icon: Blocks, tone: "emerald" },
+  { name: "TypeScript", detail: t("settings.tech.ts"), icon: SquareCode, tone: "blue" },
+  { name: "Tauri 2", detail: t("settings.tech.tauri"), icon: AppWindow, tone: "teal" },
+  { name: "Rust", detail: t("settings.tech.rust"), icon: Cpu, tone: "slate" },
+  { name: "Pinia", detail: t("settings.tech.pinia"), icon: Box, tone: "amber" },
+  { name: "Tailwind CSS", detail: t("settings.tech.tailwind"), icon: Brush, tone: "sky" },
+  { name: "Vite", detail: t("settings.tech.vite"), icon: Zap, tone: "violet" },
+  { name: "SQLite", detail: t("settings.tech.sqlite"), icon: Database, tone: "indigo" },
+]);
 
 const retentionText = computed(() => {
-  return retentionOptions.find((option) => option.value === store.retentionDays)?.label ?? "1 个月";
+  return retentionOptions.value.find((option) => option.value === store.retentionDays)?.label ?? t("settings.retention.30");
 });
 
 const appendCopyTimeoutText = computed(() => {
   const label = appendCopyTimeoutOptions.find((option) => option.value === store.appendCopyTimeoutMinutes)?.label ?? "1";
-  return `${label} 分钟`;
+  return t("common.minutes", { value: label });
 });
 
 const cloudStatusText = computed(() => {
-  return store.cloud.enabled ? "同步已开启" : "同步未开启";
+  return store.cloud.enabled ? t("settings.cloud.enabled") : t("settings.cloud.disabled");
 });
 const selectedOcrModeOption = computed(() => {
-  return ocrModeOptions.find((option) => option.value === store.ocrMode) ?? ocrModeOptions[0];
+  return ocrModeOptions.value.find((option) => option.value === store.ocrMode) ?? ocrModeOptions.value[0];
 });
 const ocrStatusText = computed(() => {
-  if (!ocrStatus.value) return "正在检查图片 OCR";
+  if (!ocrStatus.value) return t("ocr.status.checking");
   if (isMacOs) {
-    return "macOS 使用系统内置图片文字识别";
+    return t("ocr.status.macos");
   }
   if (ocrStatus.value.installed) {
-    return "已下载 Tesseract 引擎和语言包";
+    return t("ocr.status.installed");
   }
   if (lastInstalledOcrMode.value && lastInstalledOcrMode.value !== store.ocrMode) {
-    return "当前模式还未下载，下载后会替换为所选模式";
+    return t("ocr.status.modeNotDownloaded");
   }
-  return "下载后可在图片预览中识别并选中文字";
+  return t("ocr.status.readyToDownload");
 });
 const ocrDownloadedText = computed(() => {
   const downloaded = ocrProgress.value?.downloadedBytes ?? ocrStatus.value?.downloadedBytes ?? 0;
@@ -172,15 +178,15 @@ const ocrInstallPercent = computed(() => {
 });
 const ocrInstallButtonText = computed(() => {
   if (isInstallingOcr.value) {
-    return ocrProgress.value?.phase === "fetchingManifest" ? "获取资源信息" : "下载中";
+    return ocrProgress.value?.phase === "fetchingManifest" ? t("ocr.install.fetchingManifest") : t("ocr.install.downloading");
   }
   if (ocrStatus.value?.installed) {
-    return "修复资源";
+    return t("ocr.install.repair");
   }
   if (lastInstalledOcrMode.value && lastInstalledOcrMode.value !== store.ocrMode) {
-    return "切换并下载";
+    return t("ocr.install.switchAndDownload");
   }
-  return "下载 OCR 引擎和语言包";
+  return t("ocr.install.download");
 });
 
 const formattedShortcutDraft = computed(() => formatShortcut(shortcutDraft.value || store.shortcut));
@@ -188,13 +194,13 @@ const canSaveShortcut = computed(() =>
   Boolean(shortcutDraft.value && shortcutDraft.value !== store.shortcut && !isSavingShortcut.value),
 );
 const fixedShortcuts = computed(() => [
-  { keys: [formatShortcut("CommandOrControl+F")], action: "聚焦搜索" },
-  { keys: ["↑", "↓", "←", "→"], action: "在剪贴板卡片之间移动" },
-  { keys: ["Enter"], action: "粘贴选中内容" },
-  { keys: ["Esc"], action: "关闭面板或菜单" },
-  { keys: [formatShortcut("CommandOrControl+1")], action: "切换到历史记录" },
-  { keys: [formatShortcut("CommandOrControl+2")], action: "切换到第 1 个分类" },
-  { keys: [`${formatShortcut("CommandOrControl+3")} ... ${formatShortcut("CommandOrControl+9")}`], action: "继续按分类栏顺序切换后续分类" },
+  { keys: [formatShortcut("CommandOrControl+F")], action: t("settings.shortcuts.focusSearch") },
+  { keys: ["↑", "↓", "←", "→"], action: t("settings.shortcuts.moveCards") },
+  { keys: ["Enter"], action: t("settings.shortcuts.pasteSelected") },
+  { keys: ["Esc"], action: t("settings.shortcuts.closePanelOrMenu") },
+  { keys: [formatShortcut("CommandOrControl+1")], action: t("settings.shortcuts.switchHistory") },
+  { keys: [formatShortcut("CommandOrControl+2")], action: t("settings.shortcuts.switchFirstCategory") },
+  { keys: [`${formatShortcut("CommandOrControl+3")} ... ${formatShortcut("CommandOrControl+9")}`], action: t("settings.shortcuts.switchMoreCategories") },
 ]);
 
 onMounted(async () => {
@@ -255,7 +261,7 @@ function handleShortcutRecording(event: KeyboardEvent) {
 
   const shortcut = shortcutFromKeyboardEvent(event);
   if (!shortcut) {
-    shortcutError.value = "请同时按下修饰键和一个字母、数字或功能键";
+    shortcutError.value = t("settings.shortcuts.invalid");
     return;
   }
 
@@ -339,7 +345,7 @@ async function saveShortcut() {
   try {
     await store.updateShortcut(shortcutDraft.value);
     shortcutDraft.value = store.shortcut;
-    shortcutMessage.value = "快捷键已保存";
+    shortcutMessage.value = t("settings.shortcuts.saved");
   } catch (unknownError) {
     shortcutError.value = String(unknownError);
   } finally {
@@ -367,7 +373,7 @@ async function testCloud() {
   isTestingCloud.value = true;
   try {
     await store.testCloudSettings(cloudApiAddress.value, cloudApiKey.value);
-    cloudMessage.value = "连接成功";
+    cloudMessage.value = t("settings.cloud.connected");
   } catch (unknownError) {
     cloudError.value = String(unknownError);
   } finally {
@@ -382,7 +388,7 @@ async function saveCloud() {
   try {
     await store.saveCloudSettings(cloudApiAddress.value, cloudApiKey.value);
     resetCloudForm();
-    cloudMessage.value = "云端配置已保存并同步";
+    cloudMessage.value = t("settings.cloud.saved");
   } catch (unknownError) {
     cloudError.value = String(unknownError);
   } finally {
@@ -397,7 +403,7 @@ async function disableCloud() {
   try {
     await store.disableCloudSync();
     resetCloudForm();
-    cloudMessage.value = "云端同步已关闭";
+    cloudMessage.value = t("settings.cloud.disabledMessage");
   } catch (unknownError) {
     cloudError.value = String(unknownError);
   } finally {
@@ -415,6 +421,10 @@ async function updatePanelLayout(layout: PanelLayout) {
 
 async function updateAppendCopyTimeout(minutes: number) {
   await store.updateAppendCopyTimeout(minutes);
+}
+
+async function updateLanguage(language: Language) {
+  await store.updateLanguage(language);
 }
 
 async function loadOcrStatus() {
@@ -455,7 +465,7 @@ async function installOcrAssets() {
     };
     ocrStatus.value = await ipasteApi.installOcrAssets();
     lastInstalledOcrMode.value = ocrStatus.value.mode;
-    ocrMessage.value = "图片 OCR 资源已准备好";
+    ocrMessage.value = t("ocr.readyMessage");
   } catch (unknownError) {
     ocrError.value = String(unknownError);
   } finally {
@@ -471,7 +481,7 @@ async function removeOcrAssets() {
     ocrStatus.value = await ipasteApi.removeOcrAssets();
     ocrProgress.value = null;
     lastInstalledOcrMode.value = null;
-    ocrMessage.value = "图片 OCR 资源已删除";
+    ocrMessage.value = t("ocr.removedMessage");
   } catch (unknownError) {
     ocrError.value = String(unknownError);
   } finally {
@@ -501,7 +511,7 @@ function formatBytes(bytes: number) {
   <main class="settings-shell">
     <section class="settings-window">
       <header class="settings-topbar">
-        <nav class="settings-tabs" aria-label="设置分类">
+        <nav class="settings-tabs" :aria-label="t('settings.tabsLabel')">
           <button
             v-for="tab in tabs"
             :key="tab.id"
@@ -517,15 +527,39 @@ function formatBytes(bytes: number) {
       </header>
 
       <div class="settings-content subtle-scrollbar">
-        <div v-if="activeTab === 'preferences'" class="settings-section">
+        <div v-if="activeTab === 'general'" class="settings-section">
+          <section class="settings-panel items-start">
+            <div class="settings-icon settings-icon-teal">
+              <Sparkles class="size-5" />
+            </div>
+
+            <div class="min-w-0 flex-1">
+              <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.language.title") }}</h2>
+              <p class="mt-1 text-sm text-slate-500">{{ t("settings.language.description") }}</p>
+            </div>
+
+            <div class="segmented-control">
+              <button
+                v-for="option in languageOptions"
+                :key="option.value"
+                type="button"
+                class="segmented-option"
+                :class="{ 'segmented-option-active': store.language === option.value }"
+                @click="updateLanguage(option.value)"
+              >
+                {{ t(option.labelKey) }}
+              </button>
+            </div>
+          </section>
+
           <section class="settings-panel items-start">
             <div class="settings-icon settings-icon-blue">
               <SlidersHorizontal class="size-5" />
             </div>
 
             <div class="min-w-0 flex-1">
-              <h2 class="text-sm font-semibold text-slate-950">打开主窗口后默认激活</h2>
-              <p class="mt-1 text-sm text-slate-500">通过快捷键、托盘或命令打开面板时生效。</p>
+              <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.openDefault.title") }}</h2>
+              <p class="mt-1 text-sm text-slate-500">{{ t("settings.openDefault.description") }}</p>
             </div>
 
             <div class="segmented-control">
@@ -549,8 +583,8 @@ function formatBytes(bytes: number) {
                 <AppWindow class="size-5" />
               </div>
               <div class="min-w-0 flex-1">
-                <h2 class="text-sm font-semibold text-slate-950">主窗口布局</h2>
-                <p class="mt-1 text-sm text-slate-500">选择分类与剪贴板列表的排列方式。</p>
+                <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.layout.title") }}</h2>
+                <p class="mt-1 text-sm text-slate-500">{{ t("settings.layout.description") }}</p>
               </div>
             </div>
 
@@ -588,8 +622,8 @@ function formatBytes(bytes: number) {
                 <ClipboardPlus class="size-5" />
               </div>
               <div class="min-w-0 flex-1">
-                <h2 class="text-sm font-semibold text-slate-950">追加复制自动关闭</h2>
-                <p class="mt-1 text-sm text-slate-500">开启追加复制后，{{ appendCopyTimeoutText }}后自动回到普通复制。</p>
+                <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.appendCopy.title") }}</h2>
+                <p class="mt-1 text-sm text-slate-500">{{ t("settings.appendCopy.description", { duration: appendCopyTimeoutText }) }}</p>
               </div>
             </div>
 
@@ -607,14 +641,17 @@ function formatBytes(bytes: number) {
             </div>
           </section>
 
+        </div>
+
+        <div v-else-if="activeTab === 'shortcuts'" class="settings-section">
           <section class="settings-panel settings-column-panel">
             <div class="settings-panel-heading">
               <div class="settings-icon settings-icon-teal">
                 <Keyboard class="size-5" />
               </div>
               <div class="min-w-0 flex-1">
-                <h2 class="text-sm font-semibold text-slate-950">全局唤出快捷键</h2>
-                <p class="mt-1 text-sm text-slate-500">用于从其他应用打开 iPaste 面板。</p>
+                <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.shortcuts.global.title") }}</h2>
+                <p class="mt-1 text-sm text-slate-500">{{ t("settings.shortcuts.global.description") }}</p>
               </div>
             </div>
 
@@ -627,7 +664,7 @@ function formatBytes(bytes: number) {
                 @click="startRecordingShortcut"
               >
                 <Keyboard class="size-4" />
-                <span>{{ shortcutRecording ? "按下新的快捷键" : formattedShortcutDraft }}</span>
+                <span>{{ shortcutRecording ? t("settings.shortcuts.recording") : formattedShortcutDraft }}</span>
               </button>
 
               <button
@@ -637,7 +674,7 @@ function formatBytes(bytes: number) {
                 @click="restoreDefaultShortcut"
               >
                 <RotateCcw class="size-4" />
-                <span>恢复默认</span>
+                <span>{{ t("settings.shortcuts.restoreDefault") }}</span>
               </button>
 
               <button
@@ -647,7 +684,7 @@ function formatBytes(bytes: number) {
                 @click="saveShortcut"
               >
                 <Save class="size-4" />
-                <span>{{ isSavingShortcut ? "保存中" : "保存" }}</span>
+                <span>{{ isSavingShortcut ? t("common.saving") : t("common.save") }}</span>
               </button>
             </div>
 
@@ -662,17 +699,40 @@ function formatBytes(bytes: number) {
             </p>
           </section>
 
+          <section class="settings-panel settings-column-panel">
+            <div class="settings-panel-heading">
+              <div class="settings-icon settings-icon-blue">
+                <Keyboard class="size-5" />
+              </div>
+              <div class="min-w-0 flex-1">
+                <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.shortcuts.panel.title") }}</h2>
+                <p class="mt-1 text-sm text-slate-500">{{ t("settings.shortcuts.panel.description") }}</p>
+              </div>
+            </div>
+
+            <div class="settings-shortcut-list">
+              <div v-for="shortcut in fixedShortcuts" :key="shortcut.action" class="settings-shortcut-row">
+                <div class="shortcut-kbd-group" aria-hidden="true">
+                  <kbd v-for="key in shortcut.keys" :key="key" class="shortcut-kbd">{{ key }}</kbd>
+                </div>
+                <span>{{ shortcut.action }}</span>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div v-else-if="activeTab === 'ocr'" class="settings-section">
           <section v-if="!isMacOs" class="settings-panel settings-column-panel">
             <div class="settings-panel-heading">
               <div class="settings-icon settings-icon-violet">
                 <ScanText class="size-5" />
               </div>
               <div class="min-w-0 flex-1">
-                <h2 class="text-sm font-semibold text-slate-950">图片 OCR</h2>
+                <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.tabs.ocr") }}</h2>
                 <p class="mt-1 text-sm text-slate-500">{{ ocrStatusText }}</p>
               </div>
               <span class="ocr-status-badge" :class="{ 'ocr-status-badge-ready': ocrStatus?.installed }">
-                {{ ocrStatus?.installed ? "可用" : "未安装" }}
+                {{ ocrStatus?.installed ? t("common.ready") : t("common.notInstalled") }}
               </span>
             </div>
 
@@ -695,7 +755,7 @@ function formatBytes(bytes: number) {
               </button>
             </div>
             <p class="ocr-mode-hint">
-              Fast 使用 tesseract_fast 语言包，体积更小、响应更快；Best 使用 tesseract_best 语言包，下载更大、识别更细。
+              {{ t("ocr.modeHint") }}
             </p>
 
             <div class="ocr-install-panel">
@@ -709,21 +769,22 @@ function formatBytes(bytes: number) {
             </div>
 
             <div class="ocr-install-details">
-              <span>下载内容：Tesseract 引擎、简体中文语言包、英文语言包</span>
-              <span>当前选择：{{ selectedOcrModeOption.label }}，{{ selectedOcrModeOption.description }}</span>
+              <span>{{ t("ocr.downloadContents") }}</span>
+              <span>{{ t("ocr.currentSelection", { label: selectedOcrModeOption.label, description: selectedOcrModeOption.description }) }}</span>
               <div v-if="ocrStatus?.installDir" class="ocr-install-dir-row">
-                <span>目录：{{ ocrStatus.installDir }}</span>
+                <span>{{ t("ocr.directory", { path: ocrStatus.installDir }) }}</span>
                 <button
                   type="button"
                   class="settings-icon-button"
-                  title="打开下载目录"
-                  aria-label="打开下载目录"
+                  :title="t('ocr.openDownloadDir')"
+                  :aria-label="t('ocr.openDownloadDir')"
                   @click="openOcrInstallDir"
                 >
                   <FolderOpen class="size-4" />
                 </button>
               </div>
-              <span v-if="ocrProgress?.fileName">当前：{{ ocrProgress.fileName }}</span>
+              <span v-if="ocrStatus?.manifestUrl">{{ t("ocr.manifest", { url: ocrStatus.manifestUrl }) }}</span>
+              <span v-if="ocrProgress?.fileName">{{ t("ocr.currentFile", { file: ocrProgress.fileName }) }}</span>
             </div>
 
             <p v-if="ocrError || ocrMessage" class="settings-message" :class="{ 'settings-message-error': ocrError }">
@@ -750,29 +811,8 @@ function formatBytes(bytes: number) {
                 @click="removeOcrAssets"
               >
                 <Unplug class="size-4" />
-                <span>{{ isRemovingOcr ? "删除中" : "删除资源" }}</span>
+                <span>{{ isRemovingOcr ? t("ocr.deleting") : t("ocr.deleteResources") }}</span>
               </button>
-            </div>
-          </section>
-
-          <section class="settings-panel settings-column-panel">
-            <div class="settings-panel-heading">
-              <div class="settings-icon settings-icon-blue">
-                <Keyboard class="size-5" />
-              </div>
-              <div class="min-w-0 flex-1">
-                <h2 class="text-sm font-semibold text-slate-950">面板快捷键</h2>
-                <p class="mt-1 text-sm text-slate-500">数字快捷键按当前分类栏顺序生效，历史记录固定为第 1 位。</p>
-              </div>
-            </div>
-
-            <div class="settings-shortcut-list">
-              <div v-for="shortcut in fixedShortcuts" :key="shortcut.action" class="settings-shortcut-row">
-                <div class="shortcut-kbd-group" aria-hidden="true">
-                  <kbd v-for="key in shortcut.keys" :key="key" class="shortcut-kbd">{{ key }}</kbd>
-                </div>
-                <span>{{ shortcut.action }}</span>
-              </div>
             </div>
           </section>
         </div>
@@ -785,8 +825,8 @@ function formatBytes(bytes: number) {
                   <Database class="size-5" />
                 </div>
                 <div class="min-w-0">
-                  <h2 class="text-sm font-semibold text-slate-950">本地存储</h2>
-                  <p class="mt-1 text-sm text-slate-500">历史记录保留 {{ retentionText }}，到期后自动清理。</p>
+                  <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.storage.title") }}</h2>
+                  <p class="mt-1 text-sm text-slate-500">{{ t("settings.storage.description", { duration: retentionText }) }}</p>
                 </div>
               </div>
 
@@ -810,17 +850,17 @@ function formatBytes(bytes: number) {
                   <Cloud class="size-5" />
                 </div>
                 <div class="min-w-0">
-                  <h2 class="text-sm font-semibold text-slate-950">云端同步</h2>
+                  <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.cloud.title") }}</h2>
                   <p class="mt-1 text-sm text-slate-500">{{ cloudStatusText }}</p>
                 </div>
               </div>
 
               <p class="sync-hint">
-                开启后会自动同步分类和已保存的文本、链接、颜色及 HTML 内容；剪贴板历史仍只保存在本机。
+                {{ t("settings.cloud.hint") }}
               </p>
 
               <label class="settings-field">
-                <span>API 地址</span>
+                <span>{{ t("settings.cloud.apiAddress") }}</span>
                 <input v-model="cloudApiAddress" type="url" placeholder="https://your-project.pages.dev" spellcheck="false" />
               </label>
 
@@ -838,15 +878,15 @@ function formatBytes(bytes: number) {
               <div class="settings-action-row">
                 <button type="button" class="settings-action-button" :disabled="isTestingCloud" @click="testCloud">
                   <CheckCircle2 class="size-4" />
-                  <span>{{ isTestingCloud ? "测试中" : "测试连接" }}</span>
+                  <span>{{ isTestingCloud ? t("settings.cloud.testing") : t("settings.cloud.test") }}</span>
                 </button>
                 <button type="button" class="settings-action-button settings-action-button-primary" :disabled="isSavingCloud" @click="saveCloud">
                   <Cloud class="size-4" />
-                  <span>{{ isSavingCloud ? "保存中" : "保存并同步" }}</span>
+                  <span>{{ isSavingCloud ? t("common.saving") : t("settings.cloud.saveAndSync") }}</span>
                 </button>
                 <button type="button" class="settings-action-button settings-action-button-danger" :disabled="isSavingCloud || !store.cloud.enabled" @click="disableCloud">
                   <Unplug class="size-4" />
-                  <span>关闭同步</span>
+                  <span>{{ t("settings.cloud.disable") }}</span>
                 </button>
               </div>
             </section>
@@ -860,9 +900,9 @@ function formatBytes(bytes: number) {
             </div>
 
             <div class="min-w-0 flex-1">
-              <h2 class="text-sm font-semibold text-slate-950">辅助功能权限</h2>
+              <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.permissions.accessibility.title") }}</h2>
               <p class="mt-1 text-sm leading-6 text-slate-500">
-                自动粘贴需要模拟 Cmd+V。macOS 需要允许 iPaste 控制电脑，否则只能写入剪贴板，不能自动把内容粘到当前应用。
+                {{ t("settings.permissions.accessibility.description") }}
               </p>
             </div>
 
@@ -870,7 +910,7 @@ function formatBytes(bytes: number) {
               type="button"
               class="switch-control"
               :class="{ 'switch-control-active': showPermissionGuide }"
-              aria-label="显示辅助功能权限引导"
+              :aria-label="t('settings.permissions.showGuide')"
               @click="openAccessibilityGuide"
             >
               <span />
@@ -878,12 +918,12 @@ function formatBytes(bytes: number) {
           </section>
 
           <section v-if="showPermissionGuide" class="permission-guide">
-            <h3 class="text-sm font-semibold text-slate-950">开启方式</h3>
+            <h3 class="text-sm font-semibold text-slate-950">{{ t("settings.permissions.howTo") }}</h3>
             <p class="mt-2 text-sm leading-6 text-slate-600">
-              打开 macOS「系统设置 > 隐私与安全性 > 辅助功能」，找到 iPaste 并打开开关。授权后重新触发一次粘贴即可。
+              {{ t("settings.permissions.guide") }}
             </p>
             <button type="button" class="permission-link" @click="openAccessibilityGuide">
-              <span>打开辅助功能设置</span>
+              <span>{{ t("settings.permissions.open") }}</span>
               <ChevronRight class="size-4" />
             </button>
           </section>
@@ -897,7 +937,7 @@ function formatBytes(bytes: number) {
               </div>
               <div class="min-w-0">
                 <h2 class="text-sm font-semibold text-slate-950">iPaste</h2>
-                <p class="mt-1 text-sm text-slate-500">轻量本地剪贴板工具，基于原生桌面能力和前端界面构建。</p>
+                <p class="mt-1 text-sm text-slate-500">{{ t("settings.about.description") }}</p>
               </div>
             </div>
 
@@ -911,7 +951,7 @@ function formatBytes(bytes: number) {
                 </div>
                 <div class="min-w-0">
                   <div class="about-update-heading">
-                    <h3 class="about-update-title">软件更新</h3>
+                    <h3 class="about-update-title">{{ t("settings.about.softwareUpdate") }}</h3>
                     <span class="about-version-badge">v{{ appInfo?.version ?? "0.1.0" }}</span>
                   </div>
                   <p>{{ updater.updateSummaryText.value }}</p>
@@ -930,7 +970,7 @@ function formatBytes(bytes: number) {
             </section>
 
             <div>
-              <h3 class="about-label">技术栈</h3>
+              <h3 class="about-label">{{ t("settings.about.techStack") }}</h3>
               <div class="tech-stack-grid">
                 <div v-for="item in techStack" :key="item.name" class="tech-stack-item">
                   <div class="tech-stack-icon" :class="`tech-stack-icon-${item.tone}`">

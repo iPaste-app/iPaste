@@ -9,6 +9,7 @@ import {
 } from "lucide-vue-next";
 import { computed } from "vue";
 import { clipImageSrc } from "../lib/clipMedia";
+import { t } from "../i18n";
 import { categoryDisplayName, formatTime, textStats, typeLabel } from "../lib/format";
 import type { Category, ClipViewItem } from "../types";
 
@@ -123,8 +124,8 @@ function resetImagePreview(event: PointerEvent) {
     <button
       type="button"
       class="clip-expand-button"
-      aria-label="放大查看"
-      data-tooltip="放大查看"
+      :aria-label="t('clip.expand')"
+      :data-tooltip="t('clip.expand')"
       tabindex="-1"
       @click.stop="emit('expand', item)"
     >
@@ -138,8 +139,8 @@ function resetImagePreview(event: PointerEvent) {
           'border-teal-200 bg-teal-50 text-teal-700': selected,
           'clip-type-handle-reorderable': reorderEnabled,
         }"
-        :aria-label="reorderEnabled ? '拖动调整条目顺序' : typeLabel(item.clipType)"
-        :data-tooltip="reorderEnabled ? '拖动调整条目顺序' : typeLabel(item.clipType)"
+        :aria-label="reorderEnabled ? t('clip.dragReorder') : typeLabel(item.clipType)"
+        :data-tooltip="reorderEnabled ? t('clip.dragReorder') : typeLabel(item.clipType)"
         tabindex="-1"
         @click.stop="emit('select', index)"
         @dblclick.stop="emit('apply', item)"
@@ -194,7 +195,7 @@ function resetImagePreview(event: PointerEvent) {
           @pointermove="moveImagePreview"
           @pointerleave="resetImagePreview"
         >
-          <img class="w-full object-cover" :src="imageSrc" alt="图片剪贴板预览" />
+          <img class="w-full object-cover" :src="imageSrc" :alt="t('common.imagePreviewAlt')" />
         </div>
 
         <p

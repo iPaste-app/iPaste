@@ -2,6 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ClipboardPlus, Download, Search, Settings, X } from "lucide-vue-next";
+import { t } from "../i18n";
 
 const logoUrl = new URL("../../src-tauri/icons/32x32.png", import.meta.url).href;
 
@@ -68,7 +69,7 @@ function setMainWindowDragging(dragging: boolean) {
         class="min-w-0 flex-1 bg-transparent text-sm text-slate-950 outline-none placeholder:text-slate-400"
         :value="modelValue"
         tabindex="-1"
-        placeholder="搜索剪贴板内容"
+        :placeholder="t('topBar.searchPlaceholder')"
         spellcheck="false"
         @input="emit('update:modelValue', ($event.target as HTMLInputElement).value)"
       />
@@ -85,8 +86,8 @@ function setMainWindowDragging(dragging: boolean) {
       class="icon-button update-icon-button"
       :class="{ 'update-icon-button-checking': checkingUpdate }"
       tabindex="-1"
-      aria-label="打开更新"
-      data-tooltip="打开更新"
+      :aria-label="t('topBar.openUpdate')"
+      :data-tooltip="t('topBar.openUpdate')"
       @click.stop="emit('openUpdate')"
     >
       <Download class="size-4" />
@@ -98,8 +99,8 @@ function setMainWindowDragging(dragging: boolean) {
       :class="{ 'append-copy-button-active': appendCopyEnabled }"
       tabindex="-1"
       :aria-pressed="appendCopyEnabled"
-      :aria-label="appendCopyEnabled ? '关闭追加复制' : '开启追加复制'"
-      :data-tooltip="appendCopyEnabled ? '关闭追加复制' : `开启追加复制；${appendCopyTimeoutMinutes} 分钟后自动关闭`"
+      :aria-label="appendCopyEnabled ? t('appendCopy.disable') : t('appendCopy.enable')"
+      :data-tooltip="appendCopyEnabled ? t('appendCopy.disable') : t('appendCopy.enableTooltip', { minutes: appendCopyTimeoutMinutes })"
       @click.stop="emit('toggleAppendCopy')"
     >
       <ClipboardPlus class="size-4" />
@@ -110,14 +111,14 @@ function setMainWindowDragging(dragging: boolean) {
       class="icon-button"
       :class="{ 'bg-slate-100 text-slate-950': settingsOpen }"
       tabindex="-1"
-      aria-label="打开设置"
-      data-tooltip="打开设置"
+      :aria-label="t('topBar.openSettings')"
+      :data-tooltip="t('topBar.openSettings')"
       @click.stop="emit('toggleSettings')"
     >
       <Settings class="size-4" />
     </button>
 
-    <button type="button" class="icon-button" tabindex="-1" aria-label="关闭面板" data-tooltip="关闭面板" @click="emit('close')">
+    <button type="button" class="icon-button" tabindex="-1" :aria-label="t('topBar.closePanel')" :data-tooltip="t('topBar.closePanel')" @click="emit('close')">
       <X class="size-4" />
     </button>
   </header>

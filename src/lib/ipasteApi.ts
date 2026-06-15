@@ -12,6 +12,7 @@ import type {
   ClipViewerPayload,
   ClipViewItem,
   ImageOcrResult,
+  Language,
   OcrMode,
   OcrInstallStatus,
 } from "../types";
@@ -36,7 +37,7 @@ const fallbackOcrInstallStatus: OcrInstallStatus = {
 const mockCategories: Category[] = [
   {
     id: "dev",
-    name: "开发片段",
+    name: "Dev Snippets",
     color: "#2563EB",
     sortOrder: 0,
     createdAt: new Date(Date.now() - 42_400_000).toISOString(),
@@ -50,9 +51,9 @@ const mockClips: ClipItem[] = [
     clipType: "image",
     contentHash: "mock-image",
     displayName: null,
-    previewText: "图片 240 x 160",
+    previewText: "Image 240 x 160",
     text: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='160' viewBox='0 0 240 160'%3E%3Crect width='240' height='160' rx='18' fill='%23dbeafe'/%3E%3Ccircle cx='76' cy='70' r='28' fill='%230d9488'/%3E%3Cpath d='M40 126l48-42 34 30 28-24 50 36z' fill='%232563eb' opacity='.75'/%3E%3C/svg%3E",
-    sourceApp: "预览",
+    sourceApp: "Preview",
     lastCapturedAt: new Date(Date.now() - 60_000).toISOString(),
     favoriteCount: 0,
     isPinned: false,
@@ -61,7 +62,7 @@ const mockClips: ClipItem[] = [
     id: "clip-link",
     clipType: "link",
     contentHash: "mock-link",
-    displayName: "Tauri 剪贴板文档",
+    displayName: "Tauri clipboard docs",
     previewText: "https://tauri.app/plugin/clipboard/",
     text: "https://tauri.app/plugin/clipboard/",
     sourceApp: "Safari",
@@ -86,9 +87,9 @@ const mockClips: ClipItem[] = [
     clipType: "text",
     contentHash: "mock-text",
     displayName: null,
-    previewText: "使用 Tauri 命令处理原生剪贴板捕捉，让 Vue 状态只关注界面交互。",
-    text: "使用 Tauri 命令处理原生剪贴板捕捉，让 Vue 状态只关注界面交互。",
-    sourceApp: "备忘录",
+    previewText: "Use Tauri commands for native clipboard capture, keeping Vue state focused on UI interactions.",
+    text: "Use Tauri commands for native clipboard capture, keeping Vue state focused on UI interactions.",
+    sourceApp: "Notes",
     lastCapturedAt: new Date(Date.now() - 1_100_000).toISOString(),
     favoriteCount: 2,
     isPinned: false,
@@ -102,9 +103,9 @@ const mockCategoryItems: CategoryItem[] = [
     clipSnapshotId: "clip-text",
     clipType: "text",
     contentHash: "mock-text",
-    displayName: "Tauri 状态说明",
-    previewText: "使用 Tauri 命令处理原生剪贴板捕捉，让 Vue 状态只关注界面交互。",
-    text: "使用 Tauri 命令处理原生剪贴板捕捉，让 Vue 状态只关注界面交互。",
+    displayName: "Tauri state note",
+    previewText: "Use Tauri commands for native clipboard capture, keeping Vue state focused on UI interactions.",
+    text: "Use Tauri commands for native clipboard capture, keeping Vue state focused on UI interactions.",
     sortOrder: 0,
     createdAt: new Date(Date.now() - 90_000).toISOString(),
     updatedAt: new Date(Date.now() - 90_000).toISOString(),
@@ -129,6 +130,7 @@ const mockSnapshot: AppSnapshot = {
     panelOpenBehavior: "history",
     panelLayout: "top",
     ocrMode: "fast",
+    language: "en",
     cloud: {
       apiAddress: "",
       apiKey: "",
@@ -156,7 +158,7 @@ export const ipasteApi = {
             item.displayName ?? "",
             item.previewText,
             item.clipType,
-            item.clipType === "image" ? "图片 image" : item.text,
+            item.clipType === "image" ? "image" : item.text,
           ].some((value) => value.toLowerCase().includes(query)),
         )
       : mockClips;
@@ -332,6 +334,7 @@ export const ipasteApi = {
       panelOpenBehavior: mockSnapshot.settings.panelOpenBehavior,
       panelLayout: mockSnapshot.settings.panelLayout,
       ocrMode: mockSnapshot.settings.ocrMode,
+      language: mockSnapshot.settings.language,
       cloud: mockSnapshot.settings.cloud,
     });
   },
@@ -343,6 +346,7 @@ export const ipasteApi = {
       panelOpenBehavior: mockSnapshot.settings.panelOpenBehavior,
       panelLayout: mockSnapshot.settings.panelLayout,
       ocrMode: mockSnapshot.settings.ocrMode,
+      language: mockSnapshot.settings.language,
       cloud: mockSnapshot.settings.cloud,
     });
   },
@@ -354,6 +358,7 @@ export const ipasteApi = {
       panelOpenBehavior: mockSnapshot.settings.panelOpenBehavior,
       panelLayout: mockSnapshot.settings.panelLayout,
       ocrMode: mockSnapshot.settings.ocrMode,
+      language: mockSnapshot.settings.language,
       cloud: mockSnapshot.settings.cloud,
     });
   },
@@ -368,6 +373,7 @@ export const ipasteApi = {
       panelOpenBehavior: behavior,
       panelLayout: mockSnapshot.settings.panelLayout,
       ocrMode: mockSnapshot.settings.ocrMode,
+      language: mockSnapshot.settings.language,
       cloud: mockSnapshot.settings.cloud,
     });
   },
@@ -379,6 +385,7 @@ export const ipasteApi = {
       panelOpenBehavior: mockSnapshot.settings.panelOpenBehavior,
       panelLayout: layout,
       ocrMode: mockSnapshot.settings.ocrMode,
+      language: mockSnapshot.settings.language,
       cloud: mockSnapshot.settings.cloud,
     });
   },
@@ -390,6 +397,19 @@ export const ipasteApi = {
       panelOpenBehavior: mockSnapshot.settings.panelOpenBehavior,
       panelLayout: mockSnapshot.settings.panelLayout,
       ocrMode: mode,
+      language: mockSnapshot.settings.language,
+      cloud: mockSnapshot.settings.cloud,
+    });
+  },
+  updateLanguage(language: Language) {
+    return call<AppSettings>("update_language", { language }, {
+      shortcut: mockSnapshot.settings.shortcut,
+      retentionDays: mockSnapshot.settings.retentionDays,
+      appendCopyTimeoutMinutes: mockSnapshot.settings.appendCopyTimeoutMinutes,
+      panelOpenBehavior: mockSnapshot.settings.panelOpenBehavior,
+      panelLayout: mockSnapshot.settings.panelLayout,
+      ocrMode: mockSnapshot.settings.ocrMode,
+      language,
       cloud: mockSnapshot.settings.cloud,
     });
   },
@@ -401,6 +421,7 @@ export const ipasteApi = {
       panelOpenBehavior: mockSnapshot.settings.panelOpenBehavior,
       panelLayout: mockSnapshot.settings.panelLayout,
       ocrMode: mockSnapshot.settings.ocrMode,
+      language: mockSnapshot.settings.language,
       cloud: {
         apiAddress,
         apiKey,
@@ -417,6 +438,7 @@ export const ipasteApi = {
       panelOpenBehavior: mockSnapshot.settings.panelOpenBehavior,
       panelLayout: mockSnapshot.settings.panelLayout,
       ocrMode: mockSnapshot.settings.ocrMode,
+      language: mockSnapshot.settings.language,
       cloud: {
         apiAddress: "",
         apiKey: "",
@@ -455,7 +477,7 @@ export const ipasteApi = {
   },
   recognizeImageText(imagePath: string) {
     return call<ImageOcrResult>("recognize_image_text", { imagePath }, {
-      text: "iPaste 图片 OCR 测试 Select text from image 2026",
+      text: "iPaste image OCR test Select text from image 2026",
       engine: "mock",
       language: "chi_sim+eng",
       words: [],

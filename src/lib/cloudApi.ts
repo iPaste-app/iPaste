@@ -188,7 +188,7 @@ export async function cloudRequest<T = unknown>(
   const payload = (await response.json().catch(() => ({}))) as ApiEnvelope<T>;
 
   if (!response.ok) {
-    throw new Error(payload.error || `请求失败：${response.status}`);
+    throw new Error(payload.error || `Request failed: ${response.status}`);
   }
 
   return payload as T;

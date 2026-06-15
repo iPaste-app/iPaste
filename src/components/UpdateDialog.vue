@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { AlertCircle, CheckCircle2, Download, RotateCw, X } from "lucide-vue-next";
 import { cleanUpdateNotes, type UpdateErrorPhase, type UpdateStatus } from "../composables/useUpdater";
+import { t } from "../i18n";
 
 type UpdateDialogInfo = {
   currentVersion: string;
@@ -27,12 +28,12 @@ const emit = defineEmits<{
 }>();
 
 const title = computed(() => {
-  if (props.status === "downloading") return "正在更新 iPaste";
-  if (props.status === "ready") return "更新已准备好";
-  if (props.status === "error" && props.errorPhase === "install") return "安装更新失败";
-  if (props.status === "error" && props.errorPhase === "relaunch") return "重启失败";
-  if (props.status === "error") return "检查更新失败";
-  return "发现新版本";
+  if (props.status === "downloading") return t("update.title.downloading");
+  if (props.status === "ready") return t("update.title.ready");
+  if (props.status === "error" && props.errorPhase === "install") return t("update.title.installError");
+  if (props.status === "error" && props.errorPhase === "relaunch") return t("update.title.relaunchError");
+  if (props.status === "error") return t("update.title.checkError");
+  return t("update.title.available");
 });
 
 const releaseNotes = computed(() => cleanUpdateNotes(props.update?.body));
@@ -43,8 +44,8 @@ const progressPercent = computed(() => {
 });
 
 const progressText = computed(() => {
-  if (!props.totalBytes && props.downloadedBytes <= 0) return "准备下载...";
-  if (!props.totalBytes) return `${formatBytes(props.downloadedBytes)} 已下载`;
+  if (!props.totalBytes && props.downloadedBytes <= 0) return t("update.progressPreparing");
+  if (!props.totalBytes) return t("update.progressDownloaded", { bytes: formatBytes(props.downloadedBytes) });
   return `${formatBytes(props.downloadedBytes)} / ${formatBytes(props.totalBytes)}`;
 });
 
@@ -75,7 +76,7 @@ function formatBytes(bytes: number) {
         <div class="min-w-0">
           <h2 id="update-dialog-title">{{ title }}</h2>
           <p v-if="update">
-            当前版本 {{ currentVersion ?? update.currentVersion }}，新版本 {{ update.version }}
+            {{ t("update.versionLine", { current: currentVersion ?? update.currentVersion, next: update.version }) }}
           </p>
         </div>
         <button
@@ -83,8 +84,8 @@ function formatBytes(bytes: number) {
           class="update-dialog-close"
           :disabled="status === 'downloading'"
           tabindex="-1"
-          aria-label="关闭更新提示"
-          data-tooltip="关闭更新提示"
+          :aria-label="t('update.closePrompt')"
+          :data-tooltip="t('update.closePrompt')"
           @click="emit('dismiss')"
         >
           <X class="size-4" />
@@ -93,7 +94,7 @@ function formatBytes(bytes: number) {
 
       <div v-if="status === 'available'" class="update-dialog-body">
         <p>
-          下载并安装后，可以立即重启完成更新，也可以稍后手动重启。
+          {{ t("update.availableBody") }}
         </p>
         <div v-if="releaseNotes" class="update-release-notes">
           {{ releaseNotes }}
@@ -101,7 +102,7 @@ function formatBytes(bytes: number) {
       </div>
 
       <div v-else-if="status === 'downloading'" class="update-dialog-body">
-        <p>正在下载并安装更新，请保持 iPaste 运行。</p>
+        <p>{{ t("update.downloadingBody") }}</p>
         <div class="update-progress">
           <div class="update-progress-bar">
             <span :style="{ width: `${progressPercent}%` }" />
@@ -111,7 +112,7 @@ function formatBytes(bytes: number) {
       </div>
 
       <div v-else-if="status === 'ready'" class="update-dialog-body">
-        <p>更新已安装完成。重启 iPaste 后即可使用新版本。</p>
+        <p>{{ t("update.readyBody") }}</p>
       </div>
 
       <div v-else-if="status === 'error'" class="update-dialog-body">
@@ -126,7 +127,7 @@ function formatBytes(bytes: number) {
           tabindex="-1"
           @click="emit('dismiss')"
         >
-          <span>稍后</span>
+          <span>{{ t("common.later") }}</span>
         </button>
         <button
           v-if="status === 'available'"
@@ -136,7 +137,7 @@ function formatBytes(bytes: number) {
           @click="emit('install')"
         >
           <Download class="size-4" />
-          <span>立即更新</span>
+          <span>{{ t("update.installNow") }}</span>
         </button>
         <button
           v-else-if="status === 'ready'"
@@ -146,7 +147,7 @@ function formatBytes(bytes: number) {
           @click="emit('relaunch')"
         >
           <RotateCw class="size-4" />
-          <span>立即重启</span>
+          <span>{{ t("update.restartNow") }}</span>
         </button>
         <button
           v-else-if="status === 'error'"
@@ -155,7 +156,7 @@ function formatBytes(bytes: number) {
           tabindex="-1"
           @click="emit('dismiss')"
         >
-          <span>知道了</span>
+          <span>{{ t("common.gotIt") }}</span>
         </button>
       </footer>
     </section>
