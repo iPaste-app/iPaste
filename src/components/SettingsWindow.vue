@@ -31,6 +31,7 @@ import {
   Unplug,
   Zap,
 } from "lucide-vue-next";
+import LanguageSelect from "./LanguageSelect.vue";
 import UpdateDialog from "./UpdateDialog.vue";
 import { useUpdater } from "../composables/useUpdater";
 import { languageOptions, t } from "../i18n";
@@ -56,6 +57,7 @@ const cloudError = ref<string | null>(null);
 const isTestingCloud = ref(false);
 const isSavingCloud = ref(false);
 const appInfo = ref<AppInfo | null>(null);
+const isTauri = "__TAURI_INTERNALS__" in window;
 const isMacOs = /mac/i.test(navigator.platform) || /Mac OS/i.test(navigator.userAgent);
 const ocrStatus = ref<OcrInstallStatus | null>(null);
 const ocrProgress = ref<OcrInstallProgress | null>(null);
@@ -207,9 +209,11 @@ onMounted(async () => {
   await store.load();
   appInfo.value = await ipasteApi.appInfo();
   await loadOcrStatus();
-  unlistenOcrProgress = await listen<OcrInstallProgress>("ipaste://ocr-install-progress", (event) => {
-    ocrProgress.value = event.payload;
-  });
+  if (isTauri) {
+    unlistenOcrProgress = await listen<OcrInstallProgress>("ipaste://ocr-install-progress", (event) => {
+      ocrProgress.value = event.payload;
+    });
+  }
   resetShortcutForm();
   resetCloudForm();
 });
@@ -528,7 +532,7 @@ function formatBytes(bytes: number) {
 
       <div class="settings-content subtle-scrollbar">
         <div v-if="activeTab === 'general'" class="settings-section">
-          <section class="settings-panel items-start">
+          <section class="settings-panel settings-language-panel items-start">
             <div class="settings-icon settings-icon-teal">
               <Sparkles class="size-5" />
             </div>
@@ -538,18 +542,13 @@ function formatBytes(bytes: number) {
               <p class="mt-1 text-sm text-slate-500">{{ t("settings.language.description") }}</p>
             </div>
 
-            <div class="segmented-control">
-              <button
-                v-for="option in languageOptions"
-                :key="option.value"
-                type="button"
-                class="segmented-option"
-                :class="{ 'segmented-option-active': store.language === option.value }"
-                @click="updateLanguage(option.value)"
-              >
-                {{ t(option.labelKey) }}
-              </button>
-            </div>
+            <LanguageSelect
+              class="settings-language-select"
+              :model-value="store.language"
+              :options="languageOptions"
+              :label="t('settings.language.title')"
+              @update:model-value="updateLanguage"
+            />
           </section>
 
           <section class="settings-panel items-start">
