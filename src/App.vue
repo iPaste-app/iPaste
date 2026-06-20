@@ -34,7 +34,6 @@ const pendingDeleteContextKey = ref<string | null>(null);
 const editingClipKey = ref<string | null>(null);
 const editingClipName = ref("");
 const isClipListScrolling = ref(false);
-const arePanelTooltipsMuted = ref(false);
 const draggingItemKey = ref<string | null>(null);
 const itemDropTargetKey = ref<string | null>(null);
 const itemDropSide = ref<"before" | "after" | null>(null);
@@ -119,12 +118,9 @@ onMounted(async () => {
           return;
         }
 
-        if (event.payload.visible) {
-          mutePanelTooltipsUntilPointerLeavesTooltipTarget();
-          scheduleActiveElementBlur();
-          blurCategoryFocus();
-          scheduleSilentUpdateCheck();
-        }
+        scheduleActiveElementBlur();
+        blurCategoryFocus();
+        scheduleSilentUpdateCheck();
       },
     );
   }
@@ -142,7 +138,6 @@ onUnmounted(() => {
   clearSelectionScrollFrame();
   clearSearchReloadTimer();
   cleanupItemDrag();
-  unmutePanelTooltips();
   unlistenShortcutOpened?.();
   unlistenPanelKey?.();
   unlistenPanelVisibilityChanged?.();
@@ -612,7 +607,6 @@ function focusSearch() {
 
 async function hidePanelFromUi() {
   blurActiveElement();
-  mutePanelTooltipsUntilPointerLeavesTooltipTarget();
   await store.hidePanel();
 }
 
@@ -620,24 +614,6 @@ function scheduleActiveElementBlur() {
   void nextTick(() => {
     window.requestAnimationFrame(blurActiveElement);
   });
-}
-
-function mutePanelTooltipsUntilPointerLeavesTooltipTarget() {
-  arePanelTooltipsMuted.value = true;
-  window.removeEventListener("pointermove", maybeUnmutePanelTooltips, true);
-  window.addEventListener("pointermove", maybeUnmutePanelTooltips, true);
-}
-
-function maybeUnmutePanelTooltips(event: PointerEvent) {
-  const target = event.target;
-  if (target instanceof Element && target.closest("[data-tooltip]")) return;
-
-  unmutePanelTooltips();
-}
-
-function unmutePanelTooltips() {
-  arePanelTooltipsMuted.value = false;
-  window.removeEventListener("pointermove", maybeUnmutePanelTooltips, true);
 }
 
 function blurActiveElement() {
@@ -816,7 +792,7 @@ function scrollSelectedClipIntoView() {
   <SettingsWindow v-if="isSettingsWindow" />
   <ClipViewerWindow v-else-if="isClipViewerWindow" />
 
-  <main v-else class="app-shell" :class="{ 'app-shell-tooltips-muted': arePanelTooltipsMuted }" @click="closeFloatingLayers">
+  <main v-else class="app-shell" @click="closeFloatingLayers">
     <section class="flex min-w-0 flex-1 flex-col">
       <div class="relative">
         <TopBar

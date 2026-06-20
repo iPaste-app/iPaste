@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { Check, ChevronDown } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUpdate, onMounted, onUnmounted, ref, watch } from "vue";
-import { t, type I18nKey } from "../i18n";
+import { t } from "../i18n";
 import type { Language } from "../types";
 
 type LanguageSelectOption = {
   value: Language;
-  labelKey: I18nKey;
+  label: string;
 };
 
 const props = defineProps<{
@@ -29,7 +29,7 @@ const listboxId = `language-select-${Math.random().toString(36).slice(2)}`;
 const selectLabel = computed(() => props.label ?? t("settings.language.title"));
 const selectedIndex = computed(() => props.options.findIndex((option) => option.value === props.modelValue));
 const selectedOption = computed(() => props.options[selectedIndex.value] ?? props.options[0]);
-const selectedLabel = computed(() => (selectedOption.value ? t(selectedOption.value.labelKey) : ""));
+const selectedLabel = computed(() => selectedOption.value?.label ?? "");
 
 watch(
   () => props.modelValue,
@@ -194,7 +194,7 @@ function handleDocumentPointerDown(event: PointerEvent) {
           @keydown="handleOptionKeydown"
           @mouseenter="activeIndex = index"
         >
-          <span>{{ t(option.labelKey) }}</span>
+          <span>{{ option.label }}</span>
           <Check v-if="modelValue === option.value" class="size-4" aria-hidden="true" />
         </button>
       </div>

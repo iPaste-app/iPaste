@@ -4,9 +4,9 @@ import type { Language } from "./types";
 const STORAGE_KEY = "ipaste.language";
 export const DEFAULT_LANGUAGE: Language = "en";
 
-export const languageOptions: Array<{ value: Language; labelKey: I18nKey }> = [
-  { value: "en", labelKey: "language.english" },
-  { value: "zh-CN", labelKey: "language.chineseSimplified" },
+export const languageOptions: Array<{ value: Language; label: string }> = [
+  { value: "en", label: "English" },
+  { value: "zh-CN", label: "简体中文" },
 ];
 
 const messages = {
@@ -50,7 +50,7 @@ const messages = {
     "category.devSnippets": "Dev Snippets",
     "category.newCategory": "New category",
 
-    "topBar.searchPlaceholder": "Search clipboard content",
+    "topBar.searchPlaceholder": "Search clipboard",
     "topBar.openUpdate": "Open update",
     "topBar.openSettings": "Open settings",
     "topBar.closePanel": "Close panel",
@@ -286,7 +286,7 @@ const messages = {
     "category.devSnippets": "开发片段",
     "category.newCategory": "新建分类",
 
-    "topBar.searchPlaceholder": "搜索剪贴板内容",
+    "topBar.searchPlaceholder": "搜索",
     "topBar.openUpdate": "打开更新",
     "topBar.openSettings": "打开设置",
     "topBar.closePanel": "关闭面板",

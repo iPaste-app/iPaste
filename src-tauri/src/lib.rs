@@ -2540,7 +2540,7 @@ pub fn run() {
 
                     let app = app.clone();
                     thread::spawn(move || {
-                        let _ = show_main_window(&app, MainWindowActivation::PreserveCurrentApp);
+                        let _ = show_main_window(&app, MainWindowActivation::Activate);
                         let _ = app.emit("ipaste://shortcut-opened", active_shortcut);
                     });
                 })
@@ -3035,17 +3035,7 @@ fn hide_main_window(app: &tauri::AppHandle) -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 fn hide_main_window_preserving_current_app(window: &tauri::WebviewWindow) -> Result<(), String> {
-    let dispatch_window = window.clone();
-    let native_window = window.clone();
-    dispatch_window
-        .run_on_main_thread(move || {
-            let Ok(ns_window_ptr) = native_window.ns_window() else {
-                return;
-            };
-            let ns_window = unsafe { &*(ns_window_ptr.cast::<NSWindow>()) };
-            ns_window.orderOut(None);
-        })
-        .map_err(|error| error.to_string())
+    window.hide().map_err(|error| error.to_string())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -3071,22 +3061,19 @@ fn show_main_window_preserving_current_app(window: &tauri::WebviewWindow) -> Res
         .set_focusable(false)
         .map_err(|error| error.to_string())?;
 
-    let dispatch_window = window.clone();
-    let native_window = window.clone();
-    dispatch_window
-        .run_on_main_thread(move || {
-            configure_main_window_activation_on_main_thread(
-                &native_window,
-                MainWindowActivation::PreserveCurrentApp,
-            );
+    configure_main_window_activation(window, MainWindowActivation::PreserveCurrentApp);
+    window.show().map_err(|error| error.to_string())?;
 
-            let Ok(ns_window_ptr) = native_window.ns_window() else {
-                return;
-            };
-            let ns_window = unsafe { &*(ns_window_ptr.cast::<NSWindow>()) };
-            ns_window.orderFrontRegardless();
-        })
-        .map_err(|error| error.to_string())
+    let native_window = window.clone();
+    let _ = window.run_on_main_thread(move || {
+        let Ok(ns_window_ptr) = native_window.ns_window() else {
+            return;
+        };
+        let ns_window = unsafe { &*(ns_window_ptr.cast::<NSWindow>()) };
+        ns_window.setAcceptsMouseMovedEvents(true);
+    });
+
+    Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]
