@@ -259,6 +259,18 @@ input:focus-visible {
   opacity: 0 !important;
 }
 
+body.ipaste-preserve-current-app .global-tooltip,
+.app-shell-preserve-current-app .clip-card,
+.app-shell-preserve-current-app .clip-expand-button,
+.app-shell-preserve-current-app .clip-title-type-icon,
+.app-shell-preserve-current-app .clip-preview-image > img,
+.app-shell-preserve-current-app .rail-item,
+.app-shell-preserve-current-app .category-chip,
+.app-shell-preserve-current-app .context-menu-item,
+.app-shell-preserve-current-app .icon-button {
+  transition-duration: 0ms !important;
+}
+
 .icon-button.danger:hover {
   background: #fef2f2;
   color: #dc2626;
@@ -794,6 +806,7 @@ input:focus-visible {
 
 .clip-card {
   --clip-card-bg: rgba(255, 255, 255, 0.92);
+  --clip-type-rgb: 37, 99, 235;
   position: relative;
   display: flex;
   min-width: 0;
@@ -830,10 +843,31 @@ input:focus-visible {
 .clip-card-selected::before {
   position: absolute;
   inset: -1px;
+  z-index: 2;
   border-radius: inherit;
   border: 2px solid rgba(37, 99, 235, 0.86);
   content: "";
   pointer-events: none;
+}
+
+.clip-card-type-link {
+  --clip-type-rgb: 2, 132, 199;
+}
+
+.clip-card-type-color {
+  --clip-type-rgb: 13, 148, 136;
+}
+
+.clip-card-type-image {
+  --clip-type-rgb: 8, 145, 178;
+}
+
+.clip-card-type-file {
+  --clip-type-rgb: 71, 85, 105;
+}
+
+.clip-card-type-html {
+  --clip-type-rgb: 217, 119, 6;
 }
 
 .clip-card-main {
@@ -864,12 +898,16 @@ input:focus-visible {
   will-change: transform;
 }
 
+.clip-card-dragging .clip-title-type-icon {
+  cursor: grabbing;
+}
+
 .clip-card-drop-before::after,
 .clip-card-drop-after::after {
   position: absolute;
   right: 0.5rem;
   left: 0.5rem;
-  z-index: 3;
+  z-index: 8;
   height: 2px;
   border-radius: 999px;
   background: #2563eb;
@@ -883,40 +921,6 @@ input:focus-visible {
 
 .clip-card-drop-after::after {
   bottom: -0.4375rem;
-}
-
-.clip-type-handle {
-  display: grid;
-  width: 2rem;
-  height: 2rem;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid #e2e8f0;
-  border-radius: 0.5rem;
-  background: #f8fafc;
-  color: #64748b;
-  cursor: default;
-  touch-action: none;
-  user-select: none;
-  transition:
-    border-color 160ms ease,
-    background-color 160ms ease,
-    color 160ms ease,
-    box-shadow 160ms ease;
-}
-
-.clip-type-handle-reorderable {
-  cursor: grab;
-}
-
-.clip-type-handle-reorderable:hover {
-  border-color: #bfdbfe;
-  background: #eff6ff;
-  color: #2563eb;
-}
-
-.clip-type-handle-reorderable:active {
-  cursor: grabbing;
 }
 
 .clip-expand-button {
@@ -960,6 +964,46 @@ input:focus-visible {
   font-weight: 700;
 }
 
+.clip-title-type-icon {
+  display: grid;
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: rgba(var(--clip-type-rgb), 0.76);
+  cursor: default;
+  touch-action: none;
+  user-select: none;
+  transition: color 160ms ease;
+}
+
+.clip-title-type-icon-svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  stroke-width: 2.45;
+}
+
+.clip-title-type-icon-svg-text {
+  width: 0.8125rem;
+  height: 0.8125rem;
+  stroke-width: 0;
+}
+
+.clip-title-type-icon-reorderable {
+  cursor: grab;
+}
+
+.clip-title-type-icon-reorderable:hover {
+  color: rgba(var(--clip-type-rgb), 0.95);
+}
+
+.clip-title-type-icon-reorderable:active {
+  cursor: grabbing;
+}
+
 .clip-card-selected .clip-card-title {
   color: #0f172a;
 }
@@ -1000,17 +1044,14 @@ input:focus-visible {
   display: inline-flex;
   min-width: 0;
   max-width: 6.5rem;
-  height: 1.25rem;
+  height: 1rem;
   align-items: center;
   gap: 0.25rem;
-  border: 1px solid rgba(148, 163, 184, 0.42);
-  border: 1px solid color-mix(in srgb, var(--tag-color) 28%, transparent);
-  border-radius: 999px;
-  background: #f8fafc;
-  background: color-mix(in srgb, var(--tag-color) 10%, #ffffff);
-  padding: 0 0.375rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
   color: #475569;
-  color: color-mix(in srgb, var(--tag-color) 82%, #0f172a);
+  color: color-mix(in srgb, var(--tag-color) 72%, #64748b);
   font-size: 0.6875rem;
   font-weight: 650;
   line-height: 1;
@@ -1065,17 +1106,28 @@ input:focus-visible {
 }
 
 .clip-metric-badge {
-  position: absolute;
-  left: 50%;
-  bottom: 0.625rem;
-  transform: translateX(-50%);
-  max-width: calc(100% - 1rem);
-  padding: 0;
+  min-width: 0;
+  overflow: hidden;
   color: #cbd5e1;
   font-size: 0.75rem;
   font-weight: 400;
   line-height: 1;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.clip-card-footer {
+  position: absolute;
+  right: 0.625rem;
+  bottom: 0.625rem;
+  left: 0.625rem;
+  z-index: 10;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  pointer-events: none;
 }
 
 .subtle-scrollbar {

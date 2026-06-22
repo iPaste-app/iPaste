@@ -451,6 +451,7 @@ struct ListeningChanged {
 #[serde(rename_all = "camelCase")]
 struct PanelVisibilityChanged {
     visible: bool,
+    preserves_current_app: bool,
 }
 
 #[cfg(target_os = "macos")]
@@ -2501,16 +2502,25 @@ fn apply_clip(
         .map_err(|error| error.to_string())?;
     }
 
-    let _ = hide_main_window(&app);
-
     let target_app_bundle_id = state
         .target_app_bundle_id
         .lock()
         .map_err(|error| error.to_string())?
         .clone();
 
-    prepare_target_for_paste(&app, target_app_bundle_id)?;
-    send_paste_shortcut()
+    let _ = hide_main_window(&app);
+
+    if let Err(error) = prepare_target_for_paste(&app, target_app_bundle_id) {
+        let _ = show_main_window(&app, MainWindowActivation::Activate);
+        return Err(error);
+    }
+
+    if let Err(error) = send_paste_shortcut() {
+        let _ = show_main_window(&app, MainWindowActivation::Activate);
+        return Err(error);
+    }
+
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -2540,7 +2550,7 @@ pub fn run() {
 
                     let app = app.clone();
                     thread::spawn(move || {
-                        let _ = show_main_window(&app, MainWindowActivation::Activate);
+                        let _ = show_main_window(&app, MainWindowActivation::PreserveCurrentApp);
                         let _ = app.emit("ipaste://shortcut-opened", active_shortcut);
                     });
                 })
@@ -2958,6 +2968,7 @@ fn show_main_window(
 ) -> Result<(), String> {
     remember_target_app_for_paste(app);
     remember_main_window_activation(app, activation)?;
+
     let geometry = current_main_window_geometry(app);
 
     let window = if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
@@ -3006,7 +3017,10 @@ fn show_main_window(
 
     let _ = app.emit(
         "ipaste://panel-visibility-changed",
-        PanelVisibilityChanged { visible: true },
+        PanelVisibilityChanged {
+            visible: true,
+            preserves_current_app: activation == MainWindowActivation::PreserveCurrentApp,
+        },
     );
     Ok(())
 }
@@ -3020,7 +3034,10 @@ fn hide_main_window(app: &tauri::AppHandle) -> Result<(), String> {
     let activation = current_main_window_activation(app);
     let _ = app.emit(
         "ipaste://panel-visibility-changed",
-        PanelVisibilityChanged { visible: false },
+        PanelVisibilityChanged {
+            visible: false,
+            preserves_current_app: activation == MainWindowActivation::PreserveCurrentApp,
+        },
     );
 
     let result = if activation == MainWindowActivation::PreserveCurrentApp {
@@ -3035,7 +3052,17 @@ fn hide_main_window(app: &tauri::AppHandle) -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 fn hide_main_window_preserving_current_app(window: &tauri::WebviewWindow) -> Result<(), String> {
-    window.hide().map_err(|error| error.to_string())
+    let dispatch_window = window.clone();
+    let native_window = window.clone();
+    dispatch_window
+        .run_on_main_thread(move || {
+            let Ok(ns_window_ptr) = native_window.ns_window() else {
+                return;
+            };
+            let ns_window = unsafe { &*(ns_window_ptr.cast::<NSWindow>()) };
+            ns_window.orderOut(None);
+        })
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -3058,7 +3085,7 @@ fn configure_main_window_activation(
 #[cfg(target_os = "macos")]
 fn show_main_window_preserving_current_app(window: &tauri::WebviewWindow) -> Result<(), String> {
     window
-        .set_focusable(false)
+        .set_focusable(true)
         .map_err(|error| error.to_string())?;
 
     configure_main_window_activation(window, MainWindowActivation::PreserveCurrentApp);
@@ -3116,6 +3143,7 @@ fn configure_main_window_activation_on_main_thread(
     ns_window.setLevel(NSFloatingWindowLevel);
     ns_window.setCollectionBehavior(collection_behavior);
     ns_window.setHidesOnDeactivate(false);
+    ns_window.setIgnoresMouseEvents(false);
     ns_window.setAcceptsMouseMovedEvents(true);
 }
 
@@ -3401,6 +3429,13 @@ fn activate_app_for_paste(app: &tauri::AppHandle, bundle_id: &str) -> Result<(),
         return Ok(());
     }
 
+    activate_running_app_for_paste(bundle_id)?;
+
+    wait_for_frontmost_app(bundle_id, PASTE_FOCUS_TIMEOUT)
+}
+
+#[cfg(target_os = "macos")]
+fn activate_running_app_for_paste(bundle_id: &str) -> Result<(), String> {
     let target_bundle_id = NSString::from_str(bundle_id);
     let applications =
         NSRunningApplication::runningApplicationsWithBundleIdentifier(&target_bundle_id);
@@ -3408,11 +3443,14 @@ fn activate_app_for_paste(app: &tauri::AppHandle, bundle_id: &str) -> Result<(),
         return Err("无法自动粘贴：目标应用已退出，请重新打开 iPaste 面板后再粘贴。".to_string());
     };
 
-    if !target.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows) {
+    let activation_options = NSApplicationActivationOptions(
+        NSApplicationActivationOptions::ActivateAllWindows.bits() | (1 as NSUInteger) << 1,
+    );
+    if !target.activateWithOptions(activation_options) {
         return Err("无法自动粘贴：无法切回目标应用，请确认目标窗口仍可用。".to_string());
     }
 
-    wait_for_frontmost_app(bundle_id, PASTE_FOCUS_TIMEOUT)
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]

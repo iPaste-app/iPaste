@@ -20,6 +20,7 @@ const store = useIpasteStore();
 const updater = useUpdater();
 const isSettingsWindow = new URLSearchParams(window.location.search).get("window") === "settings";
 const isClipViewerWindow = new URLSearchParams(window.location.search).get("window") === "clip-viewer";
+const isPreservingCurrentApp = ref(false);
 const contextMenu = ref<{ item: ClipViewItem; index: number; x: number; y: number } | null>(null);
 const contextMenuElement = ref<HTMLElement | null>(null);
 const moveSubmenuBranchElement = ref<HTMLElement | null>(null);
@@ -109,18 +110,10 @@ onMounted(async () => {
     unlistenPanelKey = await listen<{ key: PanelKey }>("ipaste://panel-key", (event) => {
       handlePanelKey(event.payload.key);
     });
-    unlistenPanelVisibilityChanged = await listen<{ visible: boolean }>(
+    unlistenPanelVisibilityChanged = await listen<{ visible: boolean; preservesCurrentApp: boolean }>(
       "ipaste://panel-visibility-changed",
       (event) => {
-        closeFloatingLayers();
-        if (!event.payload.visible) {
-          blurActiveElement();
-          return;
-        }
-
-        scheduleActiveElementBlur();
-        blurCategoryFocus();
-        scheduleSilentUpdateCheck();
+        applyPanelVisibility(event.payload);
       },
     );
   }
@@ -144,6 +137,7 @@ onUnmounted(() => {
   unlistenShortcutOpened = null;
   unlistenPanelKey = null;
   unlistenPanelVisibilityChanged = null;
+  document.body.classList.remove("ipaste-preserve-current-app");
 });
 
 watch(
@@ -161,6 +155,29 @@ watch(
   () => scheduleSelectedClipScroll(),
   { flush: "post" },
 );
+
+watch(isPreservingCurrentApp, (preservesCurrentApp) => {
+  document.body.classList.toggle("ipaste-preserve-current-app", preservesCurrentApp);
+});
+
+function applyPanelVisibility(
+  payload: { visible: boolean; preservesCurrentApp: boolean },
+  activateDefault = false,
+) {
+  closeFloatingLayers();
+  isPreservingCurrentApp.value = payload.visible && payload.preservesCurrentApp;
+  if (!payload.visible) {
+    blurActiveElement();
+    return;
+  }
+
+  if (activateDefault) {
+    store.activatePanelDefault();
+  }
+  scheduleActiveElementBlur();
+  blurCategoryFocus();
+  scheduleSilentUpdateCheck();
+}
 
 async function createCategory() {
   const category = await store.createCategory(t("category.newCategory"));
@@ -792,7 +809,12 @@ function scrollSelectedClipIntoView() {
   <SettingsWindow v-if="isSettingsWindow" />
   <ClipViewerWindow v-else-if="isClipViewerWindow" />
 
-  <main v-else class="app-shell" @click="closeFloatingLayers">
+  <main
+    v-else
+    class="app-shell"
+    :class="{ 'app-shell-preserve-current-app': isPreservingCurrentApp }"
+    @click="closeFloatingLayers"
+  >
     <section class="flex min-w-0 flex-1 flex-col">
       <div class="relative">
         <TopBar

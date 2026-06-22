@@ -14,6 +14,7 @@ export function installTooltipOverflowGuard() {
   installed = true;
 
   document.addEventListener("pointerover", handleTooltipEnter, true);
+  document.addEventListener("pointermove", handleTooltipMove, true);
   document.addEventListener("pointerout", handleTooltipLeave, true);
   document.addEventListener("mouseover", handleTooltipEnter, true);
   document.addEventListener("mouseout", handleTooltipLeave, true);
@@ -28,6 +29,21 @@ function handleTooltipEnter(event: Event) {
   if (!target) return;
 
   activeTooltipTarget = target;
+  updateTooltipAlignment(target);
+}
+
+function handleTooltipMove(event: Event) {
+  if (!document.body.classList.contains("ipaste-preserve-current-app")) return;
+
+  const target = tooltipTargetFromEvent(event);
+  if (!target) {
+    if (activeTooltipTarget) hideTooltip();
+    return;
+  }
+
+  if (target !== activeTooltipTarget) {
+    activeTooltipTarget = target;
+  }
   updateTooltipAlignment(target);
 }
 

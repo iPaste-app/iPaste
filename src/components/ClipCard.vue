@@ -33,29 +33,34 @@ const emit = defineEmits<{
   reorderPointerDown: [payload: { item: ClipViewItem; index: number; event: PointerEvent }];
 }>();
 
-const isHistory = computed(() => props.item.collection === "history");
-const isColor = computed(() => props.item.clipType === "color");
 const isImage = computed(() => props.item.clipType === "image");
 const imageSrc = computed(() => clipImageSrc(props.item));
 const displayTitle = computed(() => props.item.displayName?.trim() || "");
 const headerLabel = computed(() => displayTitle.value || typeLabel(props.item.clipType));
 const previewContent = computed(() => props.item.text || props.item.previewText);
 const shouldFadePreview = computed(() => previewContent.value.length > 28 || previewContent.value.includes("\n"));
-const historyCategoryLabel = computed(() => {
-  if (!isHistory.value || !props.categoryTags.length) return "";
-
+const categoryTagLabel = computed(() => {
+  if (props.item.collection !== "history") return "";
+  if (!props.categoryTags.length) return "";
   const [firstCategory] = props.categoryTags;
   const label = categoryDisplayName(firstCategory.name);
   const extraCount = props.categoryTags.length - 1;
   return extraCount > 0 ? `${label} +${extraCount}` : label;
 });
-const historyCategoryColor = computed(() => {
-  if (!isHistory.value || !props.categoryTags.length) return undefined;
+const categoryTagColor = computed(() => {
+  if (props.item.collection !== "history") return undefined;
+  if (!props.categoryTags.length) return undefined;
   return props.categoryTags[0].color;
 });
 const displayTime = computed(() =>
   props.item.collection === "history" ? props.item.lastCapturedAt : props.item.createdAt,
 );
+const metricText = computed(() => {
+  if (!isImage.value) return textStats(props.item.text);
+
+  const trimmed = props.item.previewText.trim();
+  return trimmed.replace(/^(?:image|图片)\s*[:：-]?\s*/i, "").trim() || trimmed;
+});
 
 const iconComponent = computed(() => {
   if (props.item.clipType === "link") return Link;
@@ -63,11 +68,6 @@ const iconComponent = computed(() => {
   if (props.item.clipType === "image") return Image;
   if (props.item.clipType === "file") return FileText;
   return Type;
-});
-
-const colorValue = computed(() => {
-  if (!isColor.value) return "#CBD5E1";
-  return props.item.text.trim();
 });
 
 function openContextMenu(event: MouseEvent) {
@@ -114,7 +114,7 @@ function resetImagePreview(event: PointerEvent) {
 <template>
   <article
     class="clip-card group"
-    :class="{ 'clip-card-selected': selected }"
+    :class="[{ 'clip-card-selected': selected }, `clip-card-type-${item.clipType}`]"
     role="option"
     :aria-selected="selected"
     @click="emit('select', index)"
@@ -131,48 +131,35 @@ function resetImagePreview(event: PointerEvent) {
     >
       <Maximize2 class="size-3.5" />
     </button>
-    <div class="clip-card-main flex items-start gap-2.5">
-      <button
-        type="button"
-        class="clip-type-handle"
-        :class="{
-          'border-teal-200 bg-teal-50 text-teal-700': selected,
-          'clip-type-handle-reorderable': reorderEnabled,
-        }"
-        :aria-label="reorderEnabled ? t('clip.dragReorder') : typeLabel(item.clipType)"
-        :data-tooltip="reorderEnabled ? t('clip.dragReorder') : typeLabel(item.clipType)"
-        tabindex="-1"
-        @click.stop="emit('select', index)"
-        @dblclick.stop="emit('apply', item)"
-        @pointerdown.stop="startReorder"
-      >
-        <span
-          v-if="isColor"
-          class="size-5 rounded-full border border-white shadow-sm"
-          :style="{ backgroundColor: colorValue }"
-        />
-        <img
-          v-else-if="isImage"
-          class="size-6 rounded-md object-cover"
-          :src="imageSrc"
-          alt=""
-        />
-        <component :is="iconComponent" v-else class="size-4" />
-      </button>
-
-      <div class="clip-card-content min-w-0 flex-1">
+    <div class="clip-card-main">
+      <div class="clip-card-content min-w-0">
         <div class="flex items-center gap-2 pr-8">
+          <button
+            type="button"
+            class="clip-title-type-icon"
+            :class="{ 'clip-title-type-icon-reorderable': reorderEnabled }"
+            :aria-label="reorderEnabled ? t('clip.dragReorder') : typeLabel(item.clipType)"
+            :data-tooltip="reorderEnabled ? t('clip.dragReorder') : typeLabel(item.clipType)"
+            tabindex="-1"
+            @click.stop="emit('select', index)"
+            @dblclick.stop="emit('apply', item)"
+            @pointerdown.stop="startReorder"
+          >
+            <svg
+              v-if="item.clipType === 'text'"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 1024 1024"
+              fill="currentColor"
+              class="clip-title-type-icon-svg clip-title-type-icon-svg-text"
+              aria-hidden="true"
+            >
+              <path d="M853.333333 170.666667H170.666667a42.666667 42.666667 0 0 0-42.666667 42.666666v128a42.666667 42.666667 0 0 0 85.333333 0V256h256v554.666667H384a42.666667 42.666667 0 0 0 0 85.333333h256a42.666667 42.666667 0 0 0 0-85.333333h-85.333333V256h256v85.333333a42.666667 42.666667 0 0 0 85.333333 0V213.333333a42.666667 42.666667 0 0 0-42.666667-42.666666z" />
+            </svg>
+            <component :is="iconComponent" v-else class="clip-title-type-icon-svg" />
+          </button>
           <span class="clip-card-title min-w-0 truncate text-xs">{{ headerLabel }}</span>
           <span class="size-1 rounded-full bg-slate-300" />
           <span class="truncate text-xs text-slate-400">{{ formatTime(displayTime) }}</span>
-          <span
-            v-if="historyCategoryLabel"
-            class="clip-category-tag ml-auto"
-            :style="{ '--tag-color': historyCategoryColor }"
-          >
-            <span class="clip-category-tag-dot" />
-            {{ historyCategoryLabel }}
-          </span>
         </div>
 
         <input
@@ -207,6 +194,16 @@ function resetImagePreview(event: PointerEvent) {
         </p>
       </div>
     </div>
-    <span class="clip-metric-badge">{{ isImage ? item.previewText : textStats(item.text) }}</span>
+    <div class="clip-card-footer">
+      <span class="clip-metric-badge">{{ metricText }}</span>
+      <span
+        v-if="categoryTagLabel"
+        class="clip-category-tag"
+        :style="{ '--tag-color': categoryTagColor }"
+      >
+        <span class="clip-category-tag-dot" />
+        {{ categoryTagLabel }}
+      </span>
+    </div>
   </article>
 </template>

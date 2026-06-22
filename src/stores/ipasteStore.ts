@@ -332,15 +332,25 @@ export const useIpasteStore = defineStore("ipaste", () => {
 
   async function applySelected() {
     if (!selectedItem.value) return;
-    await ipasteApi.applyClip(
-      originalClipId(selectedItem.value),
-      selectedItem.value.clipType,
-      selectedItem.value.text,
-    );
+    error.value = null;
+    try {
+      await ipasteApi.applyClip(
+        originalClipId(selectedItem.value),
+        selectedItem.value.clipType,
+        selectedItem.value.text,
+      );
+    } catch (unknownError) {
+      error.value = String(unknownError);
+    }
   }
 
   async function applyItem(item: ClipViewItem) {
-    await ipasteApi.applyClip(originalClipId(item), item.clipType, item.text);
+    error.value = null;
+    try {
+      await ipasteApi.applyClip(originalClipId(item), item.clipType, item.text);
+    } catch (unknownError) {
+      error.value = String(unknownError);
+    }
   }
 
   async function copyItem(item: ClipViewItem) {
