@@ -477,6 +477,7 @@ async function applyChanges() {
       await emit<ClipUpdatedEvent>("ipaste://clip-updated", {
         collection: item.value.collection,
         item: next,
+        mergedFromId: next.id === item.value.id ? undefined : item.value.id,
       });
     }
   } catch (unknownError) {

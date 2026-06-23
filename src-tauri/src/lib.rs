@@ -1721,24 +1721,74 @@ impl Store {
     ) -> Result<ClipUpdate, String> {
         let preview_text = preview(&text);
         let content_hash = hash_text(&text);
-        let conn = self.connect()?;
         match collection.as_str() {
             "history" => {
-                conn.execute(
+                let mut conn = self.connect()?;
+                let tx = conn.transaction().map_err(|error| error.to_string())?;
+                let current = self.get_clip_with_conn(&tx, &id)?;
+
+                if let Some(existing) =
+                    self.get_clip_by_content_hash_with_conn(&tx, &content_hash, Some(&id))?
+                {
+                    let existing_id = existing.id.clone();
+                    let last_captured_at = now();
+                    let display_name = existing.display_name.clone().or(current.display_name);
+                    let is_pinned = existing.is_pinned || current.is_pinned;
+                    let favorite_count = existing.favorite_count + current.favorite_count;
+                    tx.execute(
+                        "UPDATE clips
+                         SET display_name = ?1, favorite_count = ?2, is_pinned = ?3, last_captured_at = ?4
+                         WHERE id = ?5",
+                        params![display_name, favorite_count, is_pinned, last_captured_at, existing_id],
+                    )
+                    .map_err(|error| error.to_string())?;
+                    tx.execute(
+                        "UPDATE category_items SET clip_snapshot_id = ?1 WHERE clip_snapshot_id = ?2",
+                        params![existing_id, id],
+                    )
+                    .map_err(|error| error.to_string())?;
+                    tx.execute("DELETE FROM clips WHERE id = ?1", params![id])
+                        .map_err(|error| error.to_string())?;
+                    let clip = self.get_clip_with_conn(&tx, &existing_id)?;
+                    tx.commit().map_err(|error| error.to_string())?;
+                    return Ok(ClipUpdate::Clip(clip));
+                }
+
+                tx.execute(
                     "UPDATE clips SET text = ?1, preview_text = ?2, content_hash = ?3 WHERE id = ?4",
                     params![text, preview_text, content_hash, id],
                 )
                 .map_err(|error| error.to_string())?;
-                self.get_clip_with_conn(&conn, &id).map(ClipUpdate::Clip)
+                let clip = self.get_clip_with_conn(&tx, &id)?;
+                tx.commit().map_err(|error| error.to_string())?;
+                Ok(ClipUpdate::Clip(clip))
             }
             "category" => {
-                conn.execute(
+                let mut conn = self.connect()?;
+                let tx = conn.transaction().map_err(|error| error.to_string())?;
+                let current = self.get_category_item_with_conn(&tx, &id)?;
+
+                if let Some(existing) = self.get_category_item_by_content_hash_with_conn(
+                    &tx,
+                    &current.category_id,
+                    &content_hash,
+                    Some(&id),
+                )? {
+                    self.record_tombstone_with_conn(&tx, "category_item", &id)?;
+                    tx.execute("DELETE FROM category_items WHERE id = ?1", params![id])
+                        .map_err(|error| error.to_string())?;
+                    tx.commit().map_err(|error| error.to_string())?;
+                    return Ok(ClipUpdate::CategoryItem(existing));
+                }
+
+                tx.execute(
                     "UPDATE category_items SET text = ?1, preview_text = ?2, content_hash = ?3, sync_state = 'local', updated_at = ?4 WHERE id = ?5",
                     params![text, preview_text, content_hash, now(), id],
                 )
                 .map_err(|error| error.to_string())?;
-                self.get_category_item_with_conn(&conn, &id)
-                    .map(ClipUpdate::CategoryItem)
+                let item = self.get_category_item_with_conn(&tx, &id)?;
+                tx.commit().map_err(|error| error.to_string())?;
+                Ok(ClipUpdate::CategoryItem(item))
             }
             _ => Err("未知条目来源".to_string()),
         }
@@ -1785,6 +1835,23 @@ impl Store {
         .ok_or_else(|| "未找到剪贴板记录".to_string())
     }
 
+    fn get_clip_by_content_hash_with_conn(
+        &self,
+        conn: &Connection,
+        content_hash: &str,
+        exclude_id: Option<&str>,
+    ) -> Result<Option<ClipItem>, String> {
+        conn.query_row(
+            "SELECT id, clip_type, content_hash, display_name, preview_text, text, source_app, last_captured_at, favorite_count, is_pinned
+             FROM clips
+             WHERE content_hash = ?1 AND (?2 IS NULL OR id != ?2)",
+            params![content_hash, exclude_id],
+            map_clip,
+        )
+        .optional()
+        .map_err(|error| error.to_string())
+    }
+
     fn get_category_item_with_conn(
         &self,
         conn: &Connection,
@@ -1799,6 +1866,24 @@ impl Store {
         .optional()
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "未找到分类条目".to_string())
+    }
+
+    fn get_category_item_by_content_hash_with_conn(
+        &self,
+        conn: &Connection,
+        category_id: &str,
+        content_hash: &str,
+        exclude_id: Option<&str>,
+    ) -> Result<Option<CategoryItem>, String> {
+        conn.query_row(
+            "SELECT id, category_id, clip_snapshot_id, clip_type, content_hash, display_name, preview_text, text, sort_order, created_at, updated_at, sync_state, is_pinned
+             FROM category_items
+             WHERE category_id = ?1 AND content_hash = ?2 AND (?3 IS NULL OR id != ?3)",
+            params![category_id, content_hash, exclude_id],
+            map_category_item,
+        )
+        .optional()
+        .map_err(|error| error.to_string())
     }
 
     fn list_tombstones_with_conn(&self, conn: &Connection) -> Result<Vec<Tombstone>, String> {

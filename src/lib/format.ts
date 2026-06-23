@@ -44,13 +44,24 @@ export function typeLabel(type: ClipType) {
 }
 
 export function textStats(text: string) {
-  const chars = text.length;
-  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
-  const hasCjk = /[\u4E00-\u9FFF]/.test(text);
+  const chars = countCharacters(text);
 
   if (chars > 999) return t("stats.kChars", { value: (chars / 1000).toFixed(1) });
-  if (!hasCjk && words > 1 && /[A-Za-z0-9]/.test(text)) return t("stats.words", { value: words });
   return t("stats.chars", { value: chars });
+}
+
+function countCharacters(text: string) {
+  const segmenter =
+    "Segmenter" in Intl
+      ? new (Intl as typeof Intl & {
+          Segmenter: new (
+            locale?: string,
+            options?: { granularity?: "grapheme" | "word" | "sentence" },
+          ) => { segment(input: string): Iterable<unknown> };
+        }).Segmenter(currentLocale.value, { granularity: "grapheme" })
+      : null;
+
+  return segmenter ? [...segmenter.segment(text)].length : Array.from(text).length;
 }
 
 export function syncStateLabel(value: string) {

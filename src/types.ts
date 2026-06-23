@@ -160,4 +160,5 @@ export type ClipViewerPayload = {
 export type ClipUpdatedEvent = {
   collection: "history" | "category";
   item: ClipItem | CategoryItem;
+  mergedFromId?: string;
 };

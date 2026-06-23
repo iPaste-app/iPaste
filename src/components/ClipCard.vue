@@ -34,7 +34,9 @@ const emit = defineEmits<{
 }>();
 
 const isImage = computed(() => props.item.clipType === "image");
+const isColor = computed(() => props.item.clipType === "color");
 const imageSrc = computed(() => clipImageSrc(props.item));
+const colorPreviewValue = computed(() => props.item.text.trim());
 const displayTitle = computed(() => props.item.displayName?.trim() || "");
 const headerLabel = computed(() => displayTitle.value || typeLabel(props.item.clipType));
 const previewContent = computed(() => props.item.text || props.item.previewText);
@@ -183,6 +185,11 @@ function resetImagePreview(event: PointerEvent) {
           @pointerleave="resetImagePreview"
         >
           <img class="w-full object-cover" :src="imageSrc" :alt="t('common.imagePreviewAlt')" />
+        </div>
+
+        <div v-else-if="isColor" class="clip-preview-color mt-1.5">
+          <span class="clip-preview-color-swatch" :style="{ backgroundColor: colorPreviewValue }" />
+          <span class="clip-preview-color-code">{{ previewContent }}</span>
         </div>
 
         <p

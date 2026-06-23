@@ -640,6 +640,31 @@ function formatBytes(bytes: number) {
             </div>
           </section>
 
+          <section class="settings-panel settings-column-panel">
+            <div class="settings-panel-heading">
+              <div class="settings-icon settings-icon-blue">
+                <Database class="size-5" />
+              </div>
+              <div class="min-w-0">
+                <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.storage.title") }}</h2>
+                <p class="mt-1 text-sm text-slate-500">{{ t("settings.storage.description", { duration: retentionText }) }}</p>
+              </div>
+            </div>
+
+            <div class="segmented-control settings-retention-control">
+              <button
+                v-for="option in retentionOptions"
+                :key="option.value"
+                type="button"
+                class="segmented-option"
+                :class="{ 'segmented-option-active': store.retentionDays === option.value }"
+                @click="store.updateRetentionDays(option.value)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+          </section>
+
         </div>
 
         <div v-else-if="activeTab === 'shortcuts'" class="settings-section">
@@ -820,31 +845,6 @@ function formatBytes(bytes: number) {
           <div class="data-management-grid">
             <section class="settings-panel settings-column-panel">
               <div class="settings-panel-heading">
-                <div class="settings-icon settings-icon-blue">
-                  <Database class="size-5" />
-                </div>
-                <div class="min-w-0">
-                  <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.storage.title") }}</h2>
-                  <p class="mt-1 text-sm text-slate-500">{{ t("settings.storage.description", { duration: retentionText }) }}</p>
-                </div>
-              </div>
-
-              <div class="segmented-control settings-retention-control">
-                <button
-                  v-for="option in retentionOptions"
-                  :key="option.value"
-                  type="button"
-                  class="segmented-option"
-                  :class="{ 'segmented-option-active': store.retentionDays === option.value }"
-                  @click="store.updateRetentionDays(option.value)"
-                >
-                  {{ option.label }}
-                </button>
-              </div>
-            </section>
-
-            <section class="settings-panel settings-column-panel">
-              <div class="settings-panel-heading">
                 <div class="settings-icon settings-icon-teal">
                   <Cloud class="size-5" />
                 </div>
@@ -855,7 +855,7 @@ function formatBytes(bytes: number) {
               </div>
 
               <p class="sync-hint">
-                {{ t("settings.cloud.hint") }}
+                {{ t("settings.cloud.description") }}
               </p>
 
               <label class="settings-field">

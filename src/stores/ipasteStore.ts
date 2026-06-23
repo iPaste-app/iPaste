@@ -139,6 +139,15 @@ export const useIpasteStore = defineStore("ipaste", () => {
     });
 
     await listen<ClipUpdatedEvent>("ipaste://clip-updated", (event) => {
+      if (event.payload.mergedFromId && event.payload.mergedFromId !== event.payload.item.id) {
+        if (event.payload.collection === "history") {
+          clips.value = clips.value.filter((clip) => clip.id !== event.payload.mergedFromId);
+          clipTotalCount.value = Math.max(0, clipTotalCount.value - 1);
+          visibleHistoryTotalCount.value = Math.max(0, visibleHistoryTotalCount.value - 1);
+        } else {
+          categoryItems.value = categoryItems.value.filter((item) => item.id !== event.payload.mergedFromId);
+        }
+      }
       patchItem(event.payload.collection, event.payload.item);
       if (event.payload.collection === "category") {
         syncCloudInBackground();
@@ -635,7 +644,13 @@ export const useIpasteStore = defineStore("ipaste", () => {
 
   function patchItem(collection: "history" | "category", item: ClipItem | CategoryItem) {
     if (collection === "history") {
-      clips.value = clips.value.map((clip) => (clip.id === item.id ? (item as ClipItem) : clip));
+      const clip = item as ClipItem;
+      const hasClip = clips.value.some((entry) => entry.id === clip.id);
+      if (hasClip) {
+        clips.value = clips.value.map((entry) => (entry.id === clip.id ? clip : entry));
+      } else if (clipMatchesSearch(clip, search.value)) {
+        clips.value = [clip, ...clips.value].slice(0, 120);
+      }
       return;
     }
 
