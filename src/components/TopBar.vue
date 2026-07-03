@@ -38,7 +38,10 @@ async function startWindowDrag(event: MouseEvent) {
 
   void setMainWindowDragging(true);
   try {
-    await getCurrentWindow().startDragging();
+    const nativeDragStarted = await startMainWindowDrag();
+    if (!nativeDragStarted) {
+      await getCurrentWindow().startDragging();
+    }
   } finally {
     dragReleaseTimer = window.setTimeout(() => {
       void setMainWindowDragging(false);
@@ -49,6 +52,10 @@ async function startWindowDrag(event: MouseEvent) {
 
 function setMainWindowDragging(dragging: boolean) {
   return invoke("set_main_window_dragging", { dragging }).catch(() => {});
+}
+
+function startMainWindowDrag() {
+  return invoke<boolean>("start_main_window_drag").catch(() => false);
 }
 </script>
 

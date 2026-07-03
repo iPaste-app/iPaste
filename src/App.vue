@@ -21,6 +21,7 @@ const store = useIpasteStore();
 const updater = useUpdater();
 const isSettingsWindow = new URLSearchParams(window.location.search).get("window") === "settings";
 const isClipViewerWindow = new URLSearchParams(window.location.search).get("window") === "clip-viewer";
+const isMacOs = /mac/i.test(navigator.platform) || /Mac OS/i.test(navigator.userAgent);
 const isPreservingCurrentApp = ref(false);
 const contextMenu = ref<{ item: ClipViewItem; index: number; x: number; y: number } | null>(null);
 const contextMenuElement = ref<HTMLElement | null>(null);
@@ -69,7 +70,7 @@ let searchReloadTimer: number | null = null;
 let quickPreviewOpenTimer: number | null = null;
 let lastUpdateCheckAt = 0;
 let suppressNextItemSelect = false;
-let suppressQuickPreviewUntilControlUp = false;
+let suppressQuickPreviewUntilModifierUp = false;
 
 const categoryById = computed(() =>
   store.categories.reduce<Record<string, Category>>((categories, category) => {
@@ -147,7 +148,7 @@ onMounted(async () => {
     unlistenPanelKey = await listen<{ key: PanelKey }>("ipaste://panel-key", (event) => {
       handlePanelKey(event.payload.key);
     });
-    unlistenPanelVisibilityChanged = await listen<{ visible: boolean; preservesCurrentApp: boolean }>(
+    unlistenPanelVisibilityChanged = await listen<{ visible: boolean; preservesCurrentApp: boolean; nativePanel?: boolean }>(
       "ipaste://panel-visibility-changed",
       (event) => {
         applyPanelVisibility(event.payload);
@@ -201,11 +202,12 @@ watch(isPreservingCurrentApp, (preservesCurrentApp) => {
 });
 
 function applyPanelVisibility(
-  payload: { visible: boolean; preservesCurrentApp: boolean },
+  payload: { visible: boolean; preservesCurrentApp: boolean; nativePanel?: boolean },
   activateDefault = false,
 ) {
   closeFloatingLayers();
-  isPreservingCurrentApp.value = payload.visible && payload.preservesCurrentApp;
+  const nativePanel = payload.visible && Boolean(payload.nativePanel);
+  isPreservingCurrentApp.value = payload.visible && payload.preservesCurrentApp && !nativePanel;
   if (!payload.visible) {
     blurActiveElement();
     return;
@@ -214,7 +216,9 @@ function applyPanelVisibility(
   if (activateDefault) {
     store.activatePanelDefault();
   }
-  scheduleActiveElementBlur();
+  if (!nativePanel) {
+    scheduleActiveElementBlur();
+  }
   blurCategoryFocus();
   scheduleSilentUpdateCheck();
 }
@@ -495,7 +499,7 @@ function hoverPreviewItem(item: ClipViewItem) {
   if (isQuickPreviewActive.value) return;
 
   hoveredPreviewItemKey.value = contextItemKey(item);
-  if (isQuickPreviewKeyDown.value && !suppressQuickPreviewUntilControlUp) {
+  if (isQuickPreviewKeyDown.value && !suppressQuickPreviewUntilModifierUp) {
     scheduleQuickPreview();
   }
 }
@@ -523,7 +527,7 @@ function scheduleQuickPreview() {
   const previewItemKey = hoveredPreviewItemKey.value;
   quickPreviewOpenTimer = window.setTimeout(() => {
     quickPreviewOpenTimer = null;
-    if (isQuickPreviewKeyDown.value && hoveredPreviewItemKey.value && !suppressQuickPreviewUntilControlUp) {
+    if (isQuickPreviewKeyDown.value && hoveredPreviewItemKey.value && !suppressQuickPreviewUntilModifierUp) {
       lockedPreviewItemKey.value = previewItemKey;
       isQuickPreviewActive.value = true;
     }
@@ -551,7 +555,7 @@ function closeQuickPreview() {
   lockedPreviewItemKey.value = null;
   isQuickPreviewPinned.value = false;
   isQuickPreviewKeyDown.value = false;
-  suppressQuickPreviewUntilControlUp = false;
+  suppressQuickPreviewUntilModifierUp = false;
   quickPreviewSelectedText.value = "";
   window.getSelection()?.removeAllRanges();
   stopQuickPreview({ force: true });
@@ -681,12 +685,12 @@ function handleKeydown(event: KeyboardEvent) {
     return;
   }
 
-  if (event.key === "Control") {
+  if (isQuickPreviewModifierKey(event)) {
     isQuickPreviewKeyDown.value = true;
-    suppressQuickPreviewUntilControlUp = false;
+    suppressQuickPreviewUntilModifierUp = false;
     scheduleQuickPreview();
-  } else if (event.ctrlKey) {
-    suppressQuickPreviewUntilControlUp = true;
+  } else if (hasQuickPreviewModifier(event)) {
+    suppressQuickPreviewUntilModifierUp = true;
     stopQuickPreview();
   }
 
@@ -719,11 +723,19 @@ function handleKeydown(event: KeyboardEvent) {
 }
 
 function handleKeyup(event: KeyboardEvent) {
-  if (event.key !== "Control") return;
+  if (!isQuickPreviewModifierKey(event)) return;
 
   isQuickPreviewKeyDown.value = false;
-  suppressQuickPreviewUntilControlUp = false;
+  suppressQuickPreviewUntilModifierUp = false;
   stopQuickPreview();
+}
+
+function isQuickPreviewModifierKey(event: KeyboardEvent) {
+  return isMacOs ? event.key === "Meta" || event.key === "Command" : event.key === "Control";
+}
+
+function hasQuickPreviewModifier(event: KeyboardEvent) {
+  return isMacOs ? event.metaKey : event.ctrlKey;
 }
 
 type PanelKey = "ArrowDown" | "ArrowUp" | "ArrowRight" | "ArrowLeft" | "Enter" | "Escape";
@@ -832,7 +844,7 @@ function closeFloatingLayers() {
   pendingDeleteContextKey.value = null;
   hoveredPreviewItemKey.value = null;
   isQuickPreviewKeyDown.value = false;
-  suppressQuickPreviewUntilControlUp = false;
+  suppressQuickPreviewUntilModifierUp = false;
   stopQuickPreview({ force: true });
   closeMoveSubmenu();
   categoryRailElement.value?.closeFloatingLayers();
