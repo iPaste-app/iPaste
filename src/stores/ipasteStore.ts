@@ -586,6 +586,13 @@ export const useIpasteStore = defineStore("ipaste", () => {
     }
   }
 
+  function clearSearch() {
+    if (!search.value) return;
+
+    search.value = "";
+    selectedIndex.value = 0;
+  }
+
   function activatePanelDefault() {
     if (panelOpenBehavior.value === "history" || !categories.value.some((category) => category.id === selectedCategoryId.value)) {
       selectCategory("history");
@@ -786,6 +793,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
     syncCloudNow,
     syncCloudInBackground,
     selectCategory,
+    clearSearch,
     activatePanelDefault,
     moveSelection,
     setSelectedIndex,

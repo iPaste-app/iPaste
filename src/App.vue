@@ -209,6 +209,8 @@ function applyPanelVisibility(
   const nativePanel = payload.visible && Boolean(payload.nativePanel);
   isPreservingCurrentApp.value = payload.visible && payload.preservesCurrentApp && !nativePanel;
   if (!payload.visible) {
+    store.clearSearch();
+    resetClipListScroll();
     blurActiveElement();
     return;
   }
@@ -928,6 +930,15 @@ function clearClipListScrollTimer() {
   if (clipListScrollTimer === null) return;
   window.clearTimeout(clipListScrollTimer);
   clipListScrollTimer = null;
+}
+
+function resetClipListScroll() {
+  clearClipListScrollTimer();
+  isClipListScrolling.value = false;
+
+  if (clipListElement.value) {
+    clipListElement.value.scrollTop = 0;
+  }
 }
 
 function positionMoveSubmenu() {
