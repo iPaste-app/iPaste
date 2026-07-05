@@ -198,6 +198,7 @@ const canSaveShortcut = computed(() =>
 const fixedShortcuts = computed(() => [
   { keys: [formatShortcut("CommandOrControl+F")], action: t("settings.shortcuts.focusSearch") },
   { keys: ["↑", "↓", "←", "→"], action: t("settings.shortcuts.moveCards") },
+  { keys: [isMacOs ? "Cmd" : "Ctrl"], action: t("settings.shortcuts.quickPreview") },
   { keys: ["Enter"], action: t("settings.shortcuts.pasteSelected") },
   { keys: ["Esc"], action: t("settings.shortcuts.closePanelOrMenu") },
   { keys: [formatShortcut("CommandOrControl+1")], action: t("settings.shortcuts.switchHistory") },

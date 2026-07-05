@@ -2,7 +2,7 @@
 
 > 本地优先、键盘友好的桌面剪贴板管理器。把临时复制变成可搜索、可整理、可再次使用的工作流。
 
-**语言:** [English](README.md) | 简体中文
+**语言:** [English](README.md) | 简体中文 | [日本語](README.ja.md) | [한국어](README.ko.md) | [Español](README.es.md) | [Français](README.fr.md) | [Deutsch](README.de.md)
 
 [![Release](https://img.shields.io/github/v/release/iPaste-app/iPaste?label=release)](https://github.com/iPaste-app/iPaste/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue)](#平台支持)

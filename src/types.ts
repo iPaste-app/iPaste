@@ -46,7 +46,7 @@ export type CategoryWithItem = {
 export type PanelOpenBehavior = "history" | "last_selected";
 export type PanelLayout = "top" | "side";
 export type OcrMode = "fast" | "best";
-export type Language = "en" | "zh-CN";
+export type Language = "en" | "zh-CN" | "ja" | "ko" | "es" | "fr" | "de";
 
 export type AppSnapshot = {
   clips: ClipItem[];

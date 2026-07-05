@@ -2,7 +2,7 @@
 
 > A local-first, keyboard-friendly desktop clipboard manager that turns temporary copies into searchable, organized, reusable workflow pieces.
 
-**Languages:** English | [简体中文](README.zh-CN.md)
+**Languages:** English | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Español](README.es.md) | [Français](README.fr.md) | [Deutsch](README.de.md)
 
 [![Release](https://img.shields.io/github/v/release/iPaste-app/iPaste?label=release)](https://github.com/iPaste-app/iPaste/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue)](#platform-support)
