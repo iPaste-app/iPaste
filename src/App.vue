@@ -11,7 +11,7 @@ import UpdateDialog from "./components/UpdateDialog.vue";
 import { useUpdater } from "./composables/useUpdater";
 import { t } from "./i18n";
 import { clipImageSrc } from "./lib/clipMedia";
-import { categoryDisplayName, formatShortcut, formatTime, textStats, typeLabel } from "./lib/format";
+import { categoryDisplayName, clipMetricText, formatShortcut, formatTime, typeLabel } from "./lib/format";
 import { ipasteApi } from "./lib/ipasteApi";
 import { useIpasteStore } from "./stores/ipasteStore";
 import type { Category, ClipViewItem } from "./types";
@@ -112,7 +112,12 @@ const isQuickPreviewLocked = computed(() => isQuickPreviewPinned.value);
 const quickPreviewTitle = computed(() => {
   const item = quickPreviewItem.value;
   if (!item) return "";
-  return item.displayName?.trim() || typeLabel(item.clipType);
+  return item.displayName?.trim() || "";
+});
+const quickPreviewAriaLabel = computed(() => {
+  const item = quickPreviewItem.value;
+  if (!item) return "";
+  return item.displayName?.trim() || t("clip.clipboardTitle", { type: typeLabel(item.clipType) });
 });
 const quickPreviewContent = computed(() => quickPreviewItem.value?.text || quickPreviewItem.value?.previewText || "");
 const quickPreviewImageSrc = computed(() => quickPreviewItem.value ? clipImageSrc(quickPreviewItem.value) : "");
@@ -124,7 +129,7 @@ const quickPreviewTime = computed(() => {
 const quickPreviewSize = computed(() => {
   const item = quickPreviewItem.value;
   if (!item) return "";
-  return item.clipType === "image" ? item.previewText : textStats(item.text);
+  return clipMetricText(item.clipType, item.text, item.previewText);
 });
 const quickPreviewColorValue = computed(() => quickPreviewContent.value.trim());
 
@@ -1146,17 +1151,17 @@ function scrollSelectedClipIntoView() {
             class="quick-preview-overlay"
             :class="{ 'quick-preview-overlay-locked': isQuickPreviewLocked }"
             role="dialog"
-            :aria-label="quickPreviewTitle"
+            :aria-label="quickPreviewAriaLabel"
             @pointerdown.stop="lockQuickPreview"
             @click.stop="lockQuickPreview"
             @contextmenu.stop
           >
             <div class="quick-preview-meta">
               <span class="quick-preview-type">{{ typeLabel(quickPreviewItem.clipType) }}</span>
-              <span class="quick-preview-title">{{ quickPreviewTitle }}</span>
+              <span v-if="quickPreviewTitle" class="quick-preview-title">{{ quickPreviewTitle }}</span>
               <span class="quick-preview-spacer" />
               <span>{{ formatTime(quickPreviewTime) }}</span>
-              <span>{{ quickPreviewSize }}</span>
+              <span v-if="quickPreviewSize">{{ quickPreviewSize }}</span>
               <button
                 type="button"
                 class="quick-preview-action-button"

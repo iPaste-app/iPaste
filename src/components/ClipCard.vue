@@ -10,7 +10,7 @@ import {
 import { computed } from "vue";
 import { clipImageSrc } from "../lib/clipMedia";
 import { t } from "../i18n";
-import { categoryDisplayName, formatTime, textStats, typeLabel } from "../lib/format";
+import { categoryDisplayName, clipMetricText, formatTime, typeLabel } from "../lib/format";
 import type { Category, ClipViewItem } from "../types";
 
 const props = defineProps<{
@@ -57,12 +57,7 @@ const categoryTagColor = computed(() => {
 const displayTime = computed(() =>
   props.item.collection === "history" ? props.item.lastCapturedAt : props.item.createdAt,
 );
-const metricText = computed(() => {
-  if (!isImage.value) return textStats(props.item.text);
-
-  const trimmed = props.item.previewText.trim();
-  return trimmed.replace(/^(?:image|图片)\s*[:：-]?\s*/i, "").trim() || trimmed;
-});
+const metricText = computed(() => clipMetricText(props.item.clipType, props.item.text, props.item.previewText));
 
 const iconComponent = computed(() => {
   if (props.item.clipType === "link") return Link;

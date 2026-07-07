@@ -3,7 +3,7 @@ import { Clipboard, Info, Link } from "lucide-vue-next";
 import { computed } from "vue";
 import { clipImageSrc } from "../lib/clipMedia";
 import { t } from "../i18n";
-import { formatTime, textStats, typeLabel } from "../lib/format";
+import { clipMetricText, formatTime, typeLabel } from "../lib/format";
 import type { ClipViewItem } from "../types";
 
 const props = defineProps<{
@@ -70,7 +70,7 @@ const displayTime = computed(() => {
         <dl class="mt-4 grid grid-cols-2 gap-3 text-sm text-slate-400">
           <div>
             <dt class="text-xs text-slate-400">{{ t("common.size") }}</dt>
-            <dd class="mt-1 text-slate-500">{{ isImage ? item.previewText : textStats(item.text) }}</dd>
+            <dd class="mt-1 text-slate-500">{{ clipMetricText(item.clipType, item.text, item.previewText) }}</dd>
           </div>
           <div v-if="!isImage">
             <dt class="text-xs text-slate-400">{{ t("common.lines") }}</dt>

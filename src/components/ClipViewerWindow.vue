@@ -24,7 +24,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { clipImageSrc } from "../lib/clipMedia";
 import { t } from "../i18n";
 import { clipViewerStorageKey, ipasteApi } from "../lib/ipasteApi";
-import { formatTime, textStats, typeLabel } from "../lib/format";
+import { clipMetricText, formatTime, textStats, typeLabel } from "../lib/format";
 import type { ClipUpdatedEvent, ClipViewerPayload, ImageOcrResult, ImageOcrWord } from "../types";
 
 type OcrSourceWord = ImageOcrWord & {
@@ -117,6 +117,7 @@ const imageSrc = computed(() => (item.value ? clipImageSrc(item.value) : ""));
 const showImageOcrPanel = computed(() => isImage.value && (isRecognizingImage.value || Boolean(imageOcrResult.value) || Boolean(imageOcrError.value)));
 const hasChanged = computed(() => Boolean(item.value && draftText.value !== item.value.text));
 const stats = computed(() => (item.value ? textStats(draftText.value) : ""));
+const metricText = computed(() => (item.value ? clipMetricText(item.value.clipType, draftText.value, item.value.previewText) : ""));
 const lines = computed(() => draftText.value.split(/\r?\n/).length);
 const normalizedImageRotation = computed(() => ((imageRotation.value % 360) + 360) % 360);
 const isImageRotatedSideways = computed(() => normalizedImageRotation.value === 90 || normalizedImageRotation.value === 270);
@@ -1421,7 +1422,7 @@ function clamp(value: number, min: number, max: number) {
     </section>
 
     <footer v-if="item" class="clip-viewer-footer">
-      <span>{{ isImage ? item.previewText : stats }}</span>
+      <span>{{ isImage ? metricText : stats }}</span>
       <span v-if="!isImage">{{ t("common.lineCount", { count: lines }) }}</span>
       <button type="button" class="viewer-paste-button" @click="pasteDraft">
         <ImageIcon v-if="isImage" class="size-4" />

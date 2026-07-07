@@ -1,6 +1,5 @@
 use std::{
     fs,
-    os::raw::c_int,
     path::{Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex},
@@ -4668,7 +4667,7 @@ fn captured_item_from_image(image: ImageData<'static>) -> Result<CapturedClipboa
     Ok(CapturedClipboardItem {
         clip_type: "image".to_string(),
         content_hash: hash,
-        preview_text: format!("图片 {} x {}", width, height),
+        preview_text: format!("{} x {}", width, height),
         text: String::new(),
         image_bytes: Some(png),
     })

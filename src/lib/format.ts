@@ -50,6 +50,17 @@ export function textStats(text: string) {
   return t("stats.chars", { value: chars });
 }
 
+export function imageStats(previewText: string) {
+  const trimmed = previewText.trim();
+  if (!trimmed) return "";
+
+  return trimmed.replace(/^(?:image|图片|画像|이미지|imagen|bild)\s*[:：-]?\s*/i, "").trim();
+}
+
+export function clipMetricText(type: ClipType, text: string, previewText: string) {
+  return type === "image" ? imageStats(previewText) : textStats(text);
+}
+
 function countCharacters(text: string) {
   const segmenter =
     "Segmenter" in Intl
