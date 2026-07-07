@@ -23,7 +23,7 @@ arboard = "3.6.1"
 base64 = "0.22.1"
 chrono = { version = "0.4", features = ["serde"] }
 enigo = "0.6.1"
-image = { version = "0.25.10", default-features = false, features = ["png"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif", "ico"] }
 reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "json", "rustls"] }
 rusqlite = { version = "=0.32.1", features = ["bundled"] }
 sha2 = "0.10"

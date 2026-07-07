@@ -157,6 +157,7 @@ const DEFAULT_PANEL_LAYOUT: &str = "top";
 const DEFAULT_LANGUAGE: &str = "en";
 const CLIP_PAGE_SIZE: usize = 20;
 const IMAGE_DIR: &str = "clip-images";
+const IMAGE_FILE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "webp", "gif", "ico"];
 const DEFAULT_CLIPBOARD_SEEDS: [(&str, Option<&str>, &str); 6] = [
     (
         "text",
@@ -4481,6 +4482,16 @@ fn read_clipboard_item() -> Result<ClipboardRead, String> {
         Err(error) => return Err(error.to_string()),
     }
 
+    match clipboard.get().file_list() {
+        Ok(paths) => {
+            return captured_item_from_file_list(&paths)
+                .map(|item| item.map_or(ClipboardRead::Empty, ClipboardRead::Item));
+        }
+        Err(ClipboardError::ContentNotAvailable) => {}
+        Err(ClipboardError::ClipboardOccupied) => return Ok(ClipboardRead::Occupied),
+        Err(error) => return Err(error.to_string()),
+    }
+
     match clipboard.get_text() {
         Ok(text) => {
             let normalized = text.trim();
@@ -4673,6 +4684,33 @@ fn captured_item_from_image(image: ImageData<'static>) -> Result<CapturedClipboa
     })
 }
 
+fn captured_item_from_file_list(
+    paths: &[PathBuf],
+) -> Result<Option<CapturedClipboardItem>, String> {
+    let [path] = paths else {
+        return Ok(None);
+    };
+
+    if !is_supported_image_file_path(path) || !path.is_file() {
+        return Ok(None);
+    }
+
+    image_from_source_path(path)
+        .and_then(captured_item_from_image)
+        .map(Some)
+}
+
+fn is_supported_image_file_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| {
+            IMAGE_FILE_EXTENSIONS
+                .iter()
+                .any(|supported| extension.eq_ignore_ascii_case(supported))
+        })
+        .unwrap_or(false)
+}
+
 fn captured_item_from_payload(
     clip_type: &str,
     text: &str,
@@ -4738,9 +4776,18 @@ fn image_from_source(source: &str) -> Result<ImageData<'static>, String> {
     let bytes = if source.starts_with("data:image/") {
         image_bytes_from_data_url(source)?
     } else {
-        fs::read(source).map_err(|error| error.to_string())?
+        return image_from_source_path(Path::new(source));
     };
 
+    image_from_bytes(&bytes)
+}
+
+fn image_from_source_path(path: &Path) -> Result<ImageData<'static>, String> {
+    let bytes = fs::read(path).map_err(|error| error.to_string())?;
+    image_from_bytes(&bytes)
+}
+
+fn image_from_bytes(bytes: &[u8]) -> Result<ImageData<'static>, String> {
     let decoded = image::load_from_memory(&bytes)
         .map_err(|error| error.to_string())?
         .to_rgba8();
