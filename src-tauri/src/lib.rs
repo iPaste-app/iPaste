@@ -4477,6 +4477,11 @@ fn append_copy_text(current: &str, next: &str) -> String {
 fn read_clipboard_item() -> Result<ClipboardRead, String> {
     let mut clipboard = Clipboard::new().map_err(|error| error.to_string())?;
 
+    #[cfg(target_os = "macos")]
+    if let Some(read) = read_clipboard_image_file(&mut clipboard)? {
+        return Ok(read);
+    }
+
     match clipboard.get_image() {
         Ok(image) => return captured_item_from_image(image).map(ClipboardRead::Item),
         Err(ClipboardError::ContentNotAvailable) => {}
@@ -4484,14 +4489,9 @@ fn read_clipboard_item() -> Result<ClipboardRead, String> {
         Err(error) => return Err(error.to_string()),
     }
 
-    match clipboard.get().file_list() {
-        Ok(paths) => {
-            return captured_item_from_file_list(&paths)
-                .map(|item| item.map_or(ClipboardRead::Empty, ClipboardRead::Item));
-        }
-        Err(ClipboardError::ContentNotAvailable) => {}
-        Err(ClipboardError::ClipboardOccupied) => return Ok(ClipboardRead::Occupied),
-        Err(error) => return Err(error.to_string()),
+    #[cfg(not(target_os = "macos"))]
+    if let Some(read) = read_clipboard_image_file(&mut clipboard)? {
+        return Ok(read);
     }
 
     match clipboard.get_text() {
@@ -4515,6 +4515,16 @@ fn read_clipboard_item() -> Result<ClipboardRead, String> {
     }
 
     Ok(ClipboardRead::Empty)
+}
+
+fn read_clipboard_image_file(clipboard: &mut Clipboard) -> Result<Option<ClipboardRead>, String> {
+    match clipboard.get().file_list() {
+        Ok(paths) => captured_item_from_file_list(&paths)
+            .map(|item| item.map(ClipboardRead::Item)),
+        Err(ClipboardError::ContentNotAvailable) => Ok(None),
+        Err(ClipboardError::ClipboardOccupied) => Ok(Some(ClipboardRead::Occupied)),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 fn should_capture_clipboard_item(

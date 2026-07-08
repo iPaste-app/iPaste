@@ -2039,7 +2039,7 @@ dependencies = [
 
 [[package]]
 name = "ipaste"
-version = "0.2.12"
+version = "0.2.13"
 dependencies = [
  "arboard",
  "base64 0.22.1",
