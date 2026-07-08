@@ -1,6 +1,6 @@
 [package]
 name = "ipaste"
-version = "0.2.11"
+version = "0.2.12"
 description = "A local-first tray clipboard manager for macOS and Windows."
 authors = ["iPaste Contributors"]
 license = "Apache-2.0"
