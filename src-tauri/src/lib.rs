@@ -10,6 +10,8 @@ use std::{
 #[cfg(not(target_os = "macos"))]
 use std::io::{Read, Write};
 #[cfg(target_os = "macos")]
+use std::ffi::c_int;
+#[cfg(target_os = "macos")]
 use std::time::Instant;
 
 use arboard::{Clipboard, Error as ClipboardError, ImageData};
