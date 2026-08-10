@@ -15,6 +15,7 @@ import type {
   Language,
   OcrMode,
   OcrInstallStatus,
+  StarPromptState,
 } from "../types";
 
 const isTauri = "__TAURI_INTERNALS__" in window;
@@ -32,6 +33,14 @@ const fallbackOcrInstallStatus: OcrInstallStatus = {
   downloadedBytes: 0,
   totalBytes: 37_557_099,
   missingFiles: [],
+};
+let mockStarPromptState: StarPromptState = {
+  status: "pending",
+  successfulPasteCount: 0,
+  snoozeCount: 0,
+  nextShowAt: null,
+  nextShowAfterPasteCount: null,
+  shouldShow: false,
 };
 
 const mockCategories: Category[] = [
@@ -337,6 +346,37 @@ export const ipasteApi = {
       language: mockSnapshot.settings.language,
       cloud: mockSnapshot.settings.cloud,
     });
+  },
+  starPromptState() {
+    return call<StarPromptState>("get_star_prompt_state", undefined, mockStarPromptState);
+  },
+  snoozeStarPrompt() {
+    if (!isTauri) {
+      const snoozeCount = mockStarPromptState.snoozeCount + 1;
+      mockStarPromptState = {
+        ...mockStarPromptState,
+        status: snoozeCount >= 3 ? "retired" : "snoozed",
+        snoozeCount,
+        nextShowAt: snoozeCount >= 3 ? null : new Date(Date.now() + (snoozeCount === 1 ? 7 : 30) * 86_400_000).toISOString(),
+        nextShowAfterPasteCount: snoozeCount >= 3
+          ? null
+          : mockStarPromptState.successfulPasteCount + (snoozeCount === 1 ? 30 : 100),
+        shouldShow: false,
+      };
+    }
+    return call<StarPromptState>("snooze_star_prompt", undefined, mockStarPromptState);
+  },
+  markStarPromptStarred() {
+    if (!isTauri) {
+      mockStarPromptState = {
+        ...mockStarPromptState,
+        status: "starred",
+        nextShowAt: null,
+        nextShowAfterPasteCount: null,
+        shouldShow: false,
+      };
+    }
+    return call<StarPromptState>("mark_star_prompt_starred", undefined, mockStarPromptState);
   },
   updateAppendCopyTimeout(minutes: number) {
     return call<AppSettings>("update_append_copy_timeout", { minutes }, {

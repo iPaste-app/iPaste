@@ -303,6 +303,155 @@ body.ipaste-preserve-current-app .global-tooltip,
   color: #1d4ed8;
 }
 
+.star-prompt {
+  min-width: 0;
+  margin: 0.625rem 1rem;
+  border: 1px solid #dbe3ee;
+  border-left: 3px solid #0d9488;
+  border-radius: 0.625rem;
+  background: rgba(255, 255, 255, 0.96);
+  padding: 0.6875rem 0.75rem;
+}
+
+.star-prompt-content {
+  min-width: 0;
+}
+
+.star-prompt-content h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.875rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.star-prompt-content p {
+  margin: 0.25rem 0 0;
+  color: #475569;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.star-prompt-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.375rem;
+  padding-left: 0.375rem;
+}
+
+.star-prompt-dismiss,
+.star-prompt-success,
+.star-prompt-primary {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 650;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.star-prompt-dismiss {
+  min-height: 2rem;
+  border: 0;
+  background: transparent;
+  padding: 0.3125rem 0.75rem;
+  color: #64748b;
+}
+
+.star-prompt-dismiss:hover {
+  background: #f1f5f9;
+  color: #0f766e;
+}
+
+.star-prompt-success {
+  border: 0;
+  background: transparent;
+  padding: 0.3125rem 0.75rem;
+  color: #047857;
+  white-space: nowrap;
+}
+
+.star-prompt-success:hover {
+  background: #ecfdf5;
+  color: #065f46;
+}
+
+.star-prompt-primary {
+  justify-self: end;
+  border: 1px solid #0f766e;
+  background: #0f766e;
+  padding: 0 0.6875rem;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.star-prompt-primary:hover {
+  border-color: #115e59;
+  background: #115e59;
+}
+
+.star-prompt-primary:disabled,
+.star-prompt-success:disabled,
+.star-prompt-dismiss:disabled {
+  cursor: default;
+  opacity: 0.56;
+}
+
+.star-thanks-toast {
+  position: fixed;
+  top: 4.5rem;
+  right: 1rem;
+  z-index: 70;
+  display: inline-flex;
+  min-height: 2.25rem;
+  align-items: center;
+  gap: 0.4375rem;
+  border: 1px solid #a7f3d0;
+  border-radius: 0.625rem;
+  background: rgba(236, 253, 245, 0.97);
+  padding: 0.4375rem 0.6875rem;
+  color: #047857;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+  font-size: 0.8125rem;
+  font-weight: 650;
+  pointer-events: none;
+}
+
+.star-thanks-toast-enter-active,
+.star-thanks-toast-leave-active {
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.star-thanks-toast-enter-from,
+.star-thanks-toast-leave-to {
+  opacity: 0;
+  transform: translateY(-0.25rem);
+}
+
+.star-prompt-enter-active,
+.star-prompt-leave-active {
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.star-prompt-enter-from,
+.star-prompt-leave-to {
+  opacity: 0;
+  transform: translateY(-0.375rem);
+}
+
 .main-content {
   display: flex;
   min-width: 0;
@@ -1705,6 +1854,40 @@ body.ipaste-preserve-current-app .global-tooltip,
   max-width: 100%;
 }
 
+.settings-general-panel,
+.settings-shortcuts-panel {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0 1rem;
+}
+
+.settings-general-item,
+.settings-shortcuts-item {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 1rem;
+  border-bottom: 1px solid #edf1f5;
+  padding: 1rem 0;
+}
+
+.settings-general-item:last-child,
+.settings-shortcuts-item:last-child {
+  border-bottom: 0;
+}
+
+.settings-general-item-column,
+.settings-shortcuts-item-column {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.settings-general-item > .segmented-control,
+.settings-shortcuts-item > .segmented-control {
+  max-width: 100%;
+}
+
 .settings-language-panel {
   position: relative;
   z-index: 20;
@@ -2381,27 +2564,126 @@ body.ipaste-preserve-current-app .global-tooltip,
   width: 100%;
   flex-direction: column;
   align-items: stretch;
-  gap: 1.125rem;
+  gap: 1rem;
 }
 
-.settings-about-header {
+.about-identity {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 0.875rem;
-  border-bottom: 1px solid #e2e8f0;
-  padding-bottom: 1rem;
+  gap: 0.75rem;
+  padding: 0.125rem;
 }
 
-.about-label {
-  display: block;
+.about-identity-icon {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 0.75rem;
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
+.about-identity-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.about-identity-heading {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.about-identity-heading h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.about-identity-copy > p {
+  margin: 0.1875rem 0 0;
+  color: #64748b;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.about-project-repository {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 0.125rem;
+}
+
+.about-project-icon {
+  color: #475569;
+}
+
+.about-repository-copy {
+  min-width: 0;
+}
+
+.about-repository-title {
+  margin: 0 0 0.25rem;
   color: #64748b;
   font-size: 0.75rem;
   font-weight: 650;
+  line-height: 1.35;
 }
 
-.about-label {
+.about-repository-copy p {
+  margin: 0.1875rem 0 0;
+  color: #64748b;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.about-repository-link {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 0.375rem;
+  color: #0f766e;
+  font-size: 0.875rem;
+  font-weight: 700;
+  transition: color 160ms ease;
+}
+
+.about-repository-link:hover {
+  color: #115e59;
+}
+
+.about-repository-link span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.about-star-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.about-tech-section {
+  min-width: 0;
+}
+
+.about-section-title {
+  display: block;
   margin: 0 0 0.625rem;
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 650;
 }
 
 .about-update-panel {
@@ -2410,14 +2692,12 @@ body.ipaste-preserve-current-app .global-tooltip,
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  border: 1px solid #bae6fd;
   border-radius: 0.75rem;
-  background: #f0f9ff;
-  padding: 0.875rem;
+  background: #f8fafc;
+  padding: 0.75rem 0.875rem;
 }
 
 .about-update-panel-error {
-  border-color: #fecaca;
   background: #fef2f2;
 }
 
@@ -2444,14 +2724,6 @@ body.ipaste-preserve-current-app .global-tooltip,
   color: #b91c1c;
 }
 
-.about-update-heading {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-}
-
 .about-update-title {
   margin: 0;
   color: #0f172a;
@@ -2463,11 +2735,11 @@ body.ipaste-preserve-current-app .global-tooltip,
   display: inline-flex;
   min-height: 1.375rem;
   align-items: center;
-  border: 1px solid #bae6fd;
+  border: 1px solid #ddd6fe;
   border-radius: 999px;
   background: #ffffff;
   padding: 0 0.5rem;
-  color: #0369a1;
+  color: #6d28d9;
   font-size: 0.75rem;
   font-weight: 700;
   line-height: 1;
@@ -3342,6 +3614,30 @@ body.ipaste-preserve-current-app .global-tooltip,
   line-height: 1.55;
 }
 
+.update-release-link {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.625rem;
+  border-radius: 0.5rem;
+  color: #0f766e;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.update-release-link:hover {
+  color: #115e59;
+}
+
+.update-release-link:focus-visible {
+  outline: 2px solid rgba(13, 148, 136, 0.35);
+  outline-offset: 0.1875rem;
+}
+
 .update-progress {
   display: flex;
   flex-direction: column;
@@ -3464,6 +3760,11 @@ body.ipaste-preserve-current-app .global-tooltip,
   transform: translateX(1.125rem);
 }
 
+.switch-control:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .permission-guide {
   border: 1px solid #bfdbfe;
   border-radius: 0.875rem;
@@ -3515,6 +3816,11 @@ body.ipaste-preserve-current-app .global-tooltip,
     align-items: flex-start;
   }
 
+  .settings-general-panel,
+  .settings-shortcuts-panel {
+    align-items: stretch;
+  }
+
   .settings-language-panel {
     flex-wrap: wrap;
   }
@@ -3549,6 +3855,15 @@ body.ipaste-preserve-current-app .global-tooltip,
   .about-update-panel {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .about-project-repository {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .about-star-button {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .about-update-button {

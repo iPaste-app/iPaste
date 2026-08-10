@@ -7,16 +7,16 @@ use std::{
     time::Duration,
 };
 
-#[cfg(not(target_os = "macos"))]
-use std::io::{Read, Write};
 #[cfg(target_os = "macos")]
 use std::ffi::c_int;
+#[cfg(not(target_os = "macos"))]
+use std::io::{Read, Write};
 #[cfg(target_os = "macos")]
 use std::time::Instant;
 
 use arboard::{Clipboard, Error as ClipboardError, ImageData};
 use base64::{engine::general_purpose, Engine as _};
-use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, SecondsFormat, Utc};
 use enigo::{
     Direction::{Click, Press, Release},
     Enigo, Key, Keyboard, Settings,
@@ -33,10 +33,10 @@ use objc2::{
 };
 #[cfg(target_os = "macos")]
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationOptions, NSAutoresizingMaskOptions,
-    NSBackingStoreType, NSFloatingWindowLevel, NSPanel, NSPasteboard, NSRunningApplication, NSView,
-    NSResponder, NSWindow, NSWindowAnimationBehavior, NSWindowCollectionBehavior,
-    NSWindowStyleMask, NSWorkspace,
+    NSApplication, NSApplicationActivationOptions, NSAutoresizingMaskOptions, NSBackingStoreType,
+    NSFloatingWindowLevel, NSPanel, NSPasteboard, NSResponder, NSRunningApplication, NSView,
+    NSWindow, NSWindowAnimationBehavior, NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSWorkspace,
 };
 #[cfg(target_os = "macos")]
 use objc2_core_foundation::CGRect;
@@ -56,6 +56,7 @@ use tauri::{
     utils::config::Color,
     Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
+use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use uuid::Uuid;
 #[cfg(target_os = "windows")]
@@ -157,6 +158,12 @@ const APPEND_COPY_TIMEOUT_OPTIONS: [i64; 4] = [1, 3, 5, 10];
 const DEFAULT_PANEL_OPEN_BEHAVIOR: &str = "history";
 const DEFAULT_PANEL_LAYOUT: &str = "top";
 const DEFAULT_LANGUAGE: &str = "en";
+const STAR_PROMPT_SETTING_KEY: &str = "github_star_prompt_state_v1";
+const STAR_PROMPT_INITIAL_PASTE_COUNT: u64 = 5;
+const STAR_PROMPT_FIRST_SNOOZE_DAYS: i64 = 7;
+const STAR_PROMPT_FIRST_SNOOZE_PASTES: u64 = 30;
+const STAR_PROMPT_SECOND_SNOOZE_DAYS: i64 = 30;
+const STAR_PROMPT_SECOND_SNOOZE_PASTES: u64 = 100;
 const CLIP_PAGE_SIZE: usize = 20;
 const IMAGE_DIR: &str = "clip-images";
 const IMAGE_FILE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "webp", "gif", "ico"];
@@ -301,6 +308,185 @@ struct AppSnapshot {
 #[serde(rename_all = "camelCase")]
 struct AppInfo {
     version: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum StarPromptStatus {
+    #[default]
+    Pending,
+    Snoozed,
+    Starred,
+    Retired,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct StarPromptState {
+    status: StarPromptStatus,
+    successful_paste_count: u64,
+    snooze_count: u8,
+    next_show_at: Option<String>,
+    next_show_after_paste_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StarPromptSnapshot {
+    status: StarPromptStatus,
+    successful_paste_count: u64,
+    snooze_count: u8,
+    next_show_at: Option<String>,
+    next_show_after_paste_count: Option<u64>,
+    should_show: bool,
+}
+
+impl StarPromptState {
+    fn is_terminal(&self) -> bool {
+        matches!(
+            self.status,
+            StarPromptStatus::Starred | StarPromptStatus::Retired
+        )
+    }
+
+    fn should_show_at(&self, current_time: DateTime<Utc>) -> bool {
+        match self.status {
+            StarPromptStatus::Pending => {
+                self.successful_paste_count >= STAR_PROMPT_INITIAL_PASTE_COUNT
+            }
+            StarPromptStatus::Snoozed => {
+                let has_enough_pastes = self
+                    .next_show_after_paste_count
+                    .is_some_and(|count| self.successful_paste_count >= count);
+                let has_waited_long_enough = self.next_show_at.as_deref().is_some_and(|value| {
+                    DateTime::parse_from_rfc3339(value)
+                        .map(|date| current_time >= date.with_timezone(&Utc))
+                        .unwrap_or(true)
+                });
+                has_enough_pastes && has_waited_long_enough
+            }
+            StarPromptStatus::Starred | StarPromptStatus::Retired => false,
+        }
+    }
+
+    fn snapshot_at(&self, current_time: DateTime<Utc>) -> StarPromptSnapshot {
+        StarPromptSnapshot {
+            status: self.status,
+            successful_paste_count: self.successful_paste_count,
+            snooze_count: self.snooze_count,
+            next_show_at: self.next_show_at.clone(),
+            next_show_after_paste_count: self.next_show_after_paste_count,
+            should_show: self.should_show_at(current_time),
+        }
+    }
+
+    fn snooze_at(&mut self, current_time: DateTime<Utc>) {
+        if self.is_terminal() {
+            return;
+        }
+
+        self.snooze_count = self.snooze_count.saturating_add(1);
+        match self.snooze_count {
+            1 => {
+                self.status = StarPromptStatus::Snoozed;
+                self.next_show_at = Some(
+                    (current_time + ChronoDuration::days(STAR_PROMPT_FIRST_SNOOZE_DAYS))
+                        .to_rfc3339_opts(SecondsFormat::Secs, true),
+                );
+                self.next_show_after_paste_count = Some(
+                    self.successful_paste_count
+                        .saturating_add(STAR_PROMPT_FIRST_SNOOZE_PASTES),
+                );
+            }
+            2 => {
+                self.status = StarPromptStatus::Snoozed;
+                self.next_show_at = Some(
+                    (current_time + ChronoDuration::days(STAR_PROMPT_SECOND_SNOOZE_DAYS))
+                        .to_rfc3339_opts(SecondsFormat::Secs, true),
+                );
+                self.next_show_after_paste_count = Some(
+                    self.successful_paste_count
+                        .saturating_add(STAR_PROMPT_SECOND_SNOOZE_PASTES),
+                );
+            }
+            _ => {
+                self.status = StarPromptStatus::Retired;
+                self.next_show_at = None;
+                self.next_show_after_paste_count = None;
+            }
+        }
+    }
+
+    fn mark_starred(&mut self) {
+        self.status = StarPromptStatus::Starred;
+        self.next_show_at = None;
+        self.next_show_after_paste_count = None;
+    }
+}
+
+#[cfg(test)]
+mod star_prompt_tests {
+    use super::*;
+
+    fn test_time() -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339("2026-08-08T08:00:00Z")
+            .expect("valid test time")
+            .with_timezone(&Utc)
+    }
+
+    #[test]
+    fn first_prompt_requires_five_successful_pastes() {
+        let current_time = test_time();
+        let mut state = StarPromptState {
+            successful_paste_count: 4,
+            ..StarPromptState::default()
+        };
+
+        assert!(!state.should_show_at(current_time));
+        state.successful_paste_count = 5;
+        assert!(state.should_show_at(current_time));
+    }
+
+    #[test]
+    fn snooze_requires_time_and_paste_thresholds_then_retires() {
+        let current_time = test_time();
+        let mut state = StarPromptState {
+            successful_paste_count: 5,
+            ..StarPromptState::default()
+        };
+
+        state.snooze_at(current_time);
+        assert_eq!(state.status, StarPromptStatus::Snoozed);
+        assert_eq!(state.next_show_after_paste_count, Some(35));
+        state.successful_paste_count = 35;
+        assert!(!state.should_show_at(current_time + ChronoDuration::days(6)));
+        assert!(state.should_show_at(current_time + ChronoDuration::days(7)));
+
+        state.snooze_at(current_time + ChronoDuration::days(7));
+        assert_eq!(state.next_show_after_paste_count, Some(135));
+        state.successful_paste_count = 135;
+        assert!(!state.should_show_at(current_time + ChronoDuration::days(36)));
+        assert!(state.should_show_at(current_time + ChronoDuration::days(37)));
+
+        state.snooze_at(current_time + ChronoDuration::days(37));
+        assert_eq!(state.status, StarPromptStatus::Retired);
+        assert!(!state.should_show_at(current_time + ChronoDuration::days(365)));
+    }
+
+    #[test]
+    fn starred_state_is_permanent() {
+        let current_time = test_time();
+        let mut state = StarPromptState {
+            successful_paste_count: 5,
+            ..StarPromptState::default()
+        };
+
+        state.mark_starred();
+        assert_eq!(state.status, StarPromptStatus::Starred);
+        assert!(!state.should_show_at(current_time));
+        state.snooze_at(current_time);
+        assert_eq!(state.status, StarPromptStatus::Starred);
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1020,6 +1206,66 @@ impl Store {
         )
         .optional()
         .map_err(|error| error.to_string())
+    }
+
+    fn star_prompt_snapshot(&self) -> Result<StarPromptSnapshot, String> {
+        let conn = self.connect()?;
+        let state = self.star_prompt_state_with_conn(&conn)?;
+        Ok(state.snapshot_at(Utc::now()))
+    }
+
+    fn record_successful_paste(&self) -> Result<StarPromptSnapshot, String> {
+        let conn = self.connect()?;
+        let mut state = self.star_prompt_state_with_conn(&conn)?;
+        if !state.is_terminal() {
+            state.successful_paste_count = state.successful_paste_count.saturating_add(1);
+            self.write_star_prompt_state_with_conn(&conn, &state)?;
+        }
+        Ok(state.snapshot_at(Utc::now()))
+    }
+
+    fn snooze_star_prompt(&self) -> Result<StarPromptSnapshot, String> {
+        let conn = self.connect()?;
+        let mut state = self.star_prompt_state_with_conn(&conn)?;
+        if state.is_terminal() {
+            return Ok(state.snapshot_at(Utc::now()));
+        }
+
+        let current_time = Utc::now();
+        state.snooze_at(current_time);
+        self.write_star_prompt_state_with_conn(&conn, &state)?;
+        Ok(state.snapshot_at(current_time))
+    }
+
+    fn mark_star_prompt_starred(&self) -> Result<StarPromptSnapshot, String> {
+        let conn = self.connect()?;
+        let mut state = self.star_prompt_state_with_conn(&conn)?;
+        state.mark_starred();
+        self.write_star_prompt_state_with_conn(&conn, &state)?;
+        Ok(state.snapshot_at(Utc::now()))
+    }
+
+    fn star_prompt_state_with_conn(&self, conn: &Connection) -> Result<StarPromptState, String> {
+        let Some(value) = self.setting_value_with_conn(conn, STAR_PROMPT_SETTING_KEY)? else {
+            return Ok(StarPromptState::default());
+        };
+
+        Ok(serde_json::from_str(&value).unwrap_or_default())
+    }
+
+    fn write_star_prompt_state_with_conn(
+        &self,
+        conn: &Connection,
+        state: &StarPromptState,
+    ) -> Result<(), String> {
+        let value = serde_json::to_string(state).map_err(|error| error.to_string())?;
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![STAR_PROMPT_SETTING_KEY, value],
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(())
     }
 
     fn update_cloud_settings(
@@ -2283,6 +2529,23 @@ fn update_settings(
 }
 
 #[tauri::command]
+fn get_star_prompt_state(state: tauri::State<'_, AppState>) -> Result<StarPromptSnapshot, String> {
+    state.store.star_prompt_snapshot()
+}
+
+#[tauri::command]
+fn snooze_star_prompt(state: tauri::State<'_, AppState>) -> Result<StarPromptSnapshot, String> {
+    state.store.snooze_star_prompt()
+}
+
+#[tauri::command]
+fn mark_star_prompt_starred(
+    state: tauri::State<'_, AppState>,
+) -> Result<StarPromptSnapshot, String> {
+    state.store.mark_star_prompt_starred()
+}
+
+#[tauri::command]
 fn update_append_copy_timeout(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
@@ -2695,12 +2958,20 @@ fn apply_clip(
         .map_err(|error| error.to_string())?;
     }
 
+    if let Err(error) = state.store.record_successful_paste() {
+        eprintln!("failed to record Star prompt paste count: {error}");
+    }
+
     Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -2753,6 +3024,9 @@ pub fn run() {
             set_listening,
             set_append_copy_enabled,
             update_settings,
+            get_star_prompt_state,
+            snooze_star_prompt,
+            mark_star_prompt_starred,
             update_append_copy_timeout,
             update_shortcut,
             set_app_shortcut_enabled,
@@ -3208,7 +3482,9 @@ fn show_main_window(
                     window.set_focus().map_err(|error| error.to_string())?;
                 }
                 Err(error) => {
-                    eprintln!("failed to show native main panel, falling back to activation: {error}");
+                    eprintln!(
+                        "failed to show native main panel, falling back to activation: {error}"
+                    );
                     effective_activation = MainWindowActivation::Activate;
                     remember_main_window_activation(app, MainWindowActivation::Activate)?;
                     restore_main_webview_to_host_window(app, &window)?;
@@ -3238,8 +3514,8 @@ fn hide_main_window(app: &tauri::AppHandle) -> Result<(), String> {
         .get_webview_window(MAIN_WINDOW)
         .ok_or_else(|| "未找到主面板".to_string())?;
     let activation = current_main_window_activation(app);
-    let native_panel = activation == MainWindowActivation::PreserveCurrentApp
-        && is_native_main_panel_visible(app);
+    let native_panel =
+        activation == MainWindowActivation::PreserveCurrentApp && is_native_main_panel_visible(app);
     let _ = app.emit(
         "ipaste://panel-visibility-changed",
         PanelVisibilityChanged {
@@ -3307,6 +3583,11 @@ fn show_main_window_with_native_panel(
             let panel = unsafe { &*(current.panel as *mut NSPanel) };
 
             configure_native_main_panel(panel);
+            // The webview normally lives in the Tauri host window, whose size limits are
+            // applied from WindowGeometry. The temporary native panel must inherit those
+            // limits or macOS will allow it to be resized without bounds.
+            panel.setContentMinSize(host_window.contentMinSize());
+            panel.setContentMaxSize(host_window.contentMaxSize());
             panel.setFrame_display(host_frame, false);
             let Some(content_view) = panel.contentView() else {
                 return Err("无法创建原生主面板内容视图".to_string());
@@ -3337,8 +3618,8 @@ fn show_main_window_with_native_panel(
 
 #[cfg(target_os = "macos")]
 fn create_native_main_panel(frame: NSRect) -> Result<MainPanelState, String> {
-    let mtm = objc2::MainThreadMarker::new()
-        .ok_or_else(|| "原生主面板必须在主线程创建".to_string())?;
+    let mtm =
+        objc2::MainThreadMarker::new().ok_or_else(|| "原生主面板必须在主线程创建".to_string())?;
     let _ = mtm;
     let style = NSWindowStyleMask::NonactivatingPanel
         | NSWindowStyleMask::UtilityWindow
@@ -3411,8 +3692,7 @@ fn fit_webview_to_content_view(webview_view: &NSView, content_view: &NSView) {
     let content_frame = content_view.frame();
     webview_view.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), content_frame.size));
     webview_view.setAutoresizingMask(
-        NSAutoresizingMaskOptions::ViewWidthSizable
-            | NSAutoresizingMaskOptions::ViewHeightSizable,
+        NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
     );
 }
 
@@ -3835,10 +4115,7 @@ fn activate_app_for_paste(app: &tauri::AppHandle, bundle_id: &str) -> Result<(),
 }
 
 #[cfg(target_os = "macos")]
-fn activate_running_app_for_paste(
-    app: &tauri::AppHandle,
-    bundle_id: &str,
-) -> Result<bool, String> {
+fn activate_running_app_for_paste(app: &tauri::AppHandle, bundle_id: &str) -> Result<bool, String> {
     let bundle_id = bundle_id.to_string();
     run_on_main_thread_for_paste(app, move || {
         activate_running_app_for_paste_on_main_thread(&bundle_id)
@@ -4519,8 +4796,7 @@ fn read_clipboard_item() -> Result<ClipboardRead, String> {
 
 fn read_clipboard_image_file(clipboard: &mut Clipboard) -> Result<Option<ClipboardRead>, String> {
     match clipboard.get().file_list() {
-        Ok(paths) => captured_item_from_file_list(&paths)
-            .map(|item| item.map(ClipboardRead::Item)),
+        Ok(paths) => captured_item_from_file_list(&paths).map(|item| item.map(ClipboardRead::Item)),
         Err(ClipboardError::ContentNotAvailable) => Ok(None),
         Err(ClipboardError::ClipboardOccupied) => Ok(Some(ClipboardRead::Occupied)),
         Err(error) => Err(error.to_string()),

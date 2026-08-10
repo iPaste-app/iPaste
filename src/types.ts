@@ -82,6 +82,15 @@ export type AppInfo = {
   version: string;
 };
 
+export type StarPromptState = {
+  status: "pending" | "snoozed" | "starred" | "retired";
+  successfulPasteCount: number;
+  snoozeCount: number;
+  nextShowAt?: string | null;
+  nextShowAfterPasteCount?: number | null;
+  shouldShow: boolean;
+};
+
 export type OcrInstallStatus = {
   installed: boolean;
   engineId: string;

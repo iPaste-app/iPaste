@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { AlertCircle, CheckCircle2, Download, RotateCw, X } from "lucide-vue-next";
+import { AlertCircle, CheckCircle2, Download, ExternalLink, RotateCw, X } from "lucide-vue-next";
 import { cleanUpdateNotes, type UpdateErrorPhase, type UpdateStatus } from "../composables/useUpdater";
 import { t } from "../i18n";
+import { openGitHubRelease } from "../lib/starPrompt";
 
 type UpdateDialogInfo = {
   currentVersion: string;
@@ -37,6 +38,9 @@ const title = computed(() => {
 });
 
 const releaseNotes = computed(() => cleanUpdateNotes(props.update?.body));
+const releaseNotesLinkText = computed(() =>
+  t(releaseNotes.value ? "update.viewFullReleaseNotes" : "update.viewReleaseNotes"),
+);
 
 const progressPercent = computed(() => {
   if (!props.totalBytes || props.totalBytes <= 0) return 0;
@@ -61,6 +65,16 @@ function formatBytes(bytes: number) {
   }
 
   return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
+}
+
+async function openReleaseNotes() {
+  if (!props.update?.version) return;
+
+  try {
+    await openGitHubRelease(props.update.version);
+  } catch (error) {
+    console.warn("[ipaste] failed to open GitHub release", error);
+  }
 }
 </script>
 
@@ -99,6 +113,10 @@ function formatBytes(bytes: number) {
         <div v-if="releaseNotes" class="update-release-notes">
           {{ releaseNotes }}
         </div>
+        <button type="button" class="update-release-link" @click="openReleaseNotes">
+          <span>{{ releaseNotesLinkText }}</span>
+          <ExternalLink class="size-3.5" aria-hidden="true" />
+        </button>
       </div>
 
       <div v-else-if="status === 'downloading'" class="update-dialog-body">

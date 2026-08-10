@@ -33,6 +33,7 @@ export function useUpdater() {
     if (updateStatus.value === "checking") return t("update.button.checking");
     if (updateStatus.value === "downloading") return t("update.button.downloading");
     if (updateStatus.value === "ready") return t("update.button.ready");
+    if (updateStatus.value === "available") return t("update.button.view");
     return t("update.button.idle");
   });
 

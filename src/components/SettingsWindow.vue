@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabledBySystem } from "@tauri-apps/plugin-autostart";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import {
@@ -15,10 +16,13 @@ import {
   Cpu,
   Database,
   Download,
+  ExternalLink,
   FolderOpen,
+  Github,
   History,
   Keyboard,
   LoaderCircle,
+  Power,
   RefreshCw,
   RotateCcw,
   Save,
@@ -37,6 +41,10 @@ import { useUpdater } from "../composables/useUpdater";
 import { languageOptions, t } from "../i18n";
 import { ipasteApi } from "../lib/ipasteApi";
 import { formatShortcut } from "../lib/format";
+import {
+  IPASTE_GITHUB_REPOSITORY_URL,
+  openGitHubRepository,
+} from "../lib/starPrompt";
 import { useIpasteStore } from "../stores/ipasteStore";
 import type { AppInfo, Language, OcrInstallProgress, OcrInstallStatus, OcrMode, PanelLayout, PanelOpenBehavior } from "../types";
 
@@ -66,6 +74,10 @@ const ocrError = ref<string | null>(null);
 const isInstallingOcr = ref(false);
 const isRemovingOcr = ref(false);
 const lastInstalledOcrMode = ref<OcrMode | null>(null);
+const autostartEnabled = ref(false);
+const isLoadingAutostart = ref(true);
+const isUpdatingAutostart = ref(false);
+const autostartError = ref<string | null>(null);
 let unlistenOcrProgress: UnlistenFn | null = null;
 let shouldRestoreAppShortcutAfterRecording = false;
 const updater = useUpdater();
@@ -210,6 +222,7 @@ onMounted(async () => {
   await store.load();
   appInfo.value = await ipasteApi.appInfo();
   await loadOcrStatus();
+  await loadAutostartStatus();
   if (isTauri) {
     unlistenOcrProgress = await listen<OcrInstallProgress>("ipaste://ocr-install-progress", (event) => {
       ocrProgress.value = event.payload;
@@ -227,6 +240,46 @@ onUnmounted(() => {
 async function openAccessibilityGuide() {
   showPermissionGuide.value = true;
   await ipasteApi.openAccessibilitySettings();
+}
+
+async function openSourceRepository() {
+  await openGitHubRepository();
+}
+
+async function loadAutostartStatus() {
+  isLoadingAutostart.value = true;
+  autostartError.value = null;
+  try {
+    autostartEnabled.value = isTauri ? await isAutostartEnabledBySystem() : false;
+  } catch (unknownError) {
+    autostartError.value = t("settings.autostart.readError", { error: String(unknownError) });
+  } finally {
+    isLoadingAutostart.value = false;
+  }
+}
+
+async function toggleAutostart() {
+  if (isLoadingAutostart.value || isUpdatingAutostart.value) return;
+
+  const nextEnabled = !autostartEnabled.value;
+  isUpdatingAutostart.value = true;
+  autostartError.value = null;
+  try {
+    if (isTauri) {
+      if (nextEnabled) {
+        await enableAutostart();
+      } else {
+        await disableAutostart();
+      }
+      autostartEnabled.value = await isAutostartEnabledBySystem();
+    } else {
+      autostartEnabled.value = nextEnabled;
+    }
+  } catch (unknownError) {
+    autostartError.value = t("settings.autostart.updateError", { error: String(unknownError) });
+  } finally {
+    isUpdatingAutostart.value = false;
+  }
 }
 
 function resetShortcutForm() {
@@ -533,217 +586,249 @@ function formatBytes(bytes: number) {
 
       <div class="settings-content subtle-scrollbar">
         <div v-if="activeTab === 'general'" class="settings-section">
-          <section class="settings-panel settings-language-panel items-start">
-            <div class="settings-icon settings-icon-teal">
-              <Sparkles class="size-5" />
-            </div>
-
-            <div class="min-w-0 flex-1">
-              <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.language.title") }}</h2>
-              <p class="mt-1 text-sm text-slate-500">{{ t("settings.language.description") }}</p>
-            </div>
-
-            <LanguageSelect
-              class="settings-language-select"
-              :model-value="store.language"
-              :options="languageOptions"
-              :label="t('settings.language.title')"
-              @update:model-value="updateLanguage"
-            />
-          </section>
-
-          <section class="settings-panel items-start">
-            <div class="settings-icon settings-icon-blue">
-              <SlidersHorizontal class="size-5" />
-            </div>
-
-            <div class="min-w-0 flex-1">
-              <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.openDefault.title") }}</h2>
-              <p class="mt-1 text-sm text-slate-500">{{ t("settings.openDefault.description") }}</p>
-            </div>
-
-            <div class="segmented-control">
-              <button
-                v-for="option in panelOpenOptions"
-                :key="option.value"
-                type="button"
-                class="segmented-option segmented-option-with-icon"
-                :class="{ 'segmented-option-active': store.panelOpenBehavior === option.value }"
-                @click="updatePanelOpenBehavior(option.value)"
-              >
-                <component :is="option.icon" class="size-3.5" />
-                <span>{{ option.label }}</span>
-              </button>
-            </div>
-          </section>
-
-          <section class="settings-panel settings-column-panel">
-            <div class="settings-panel-heading">
-              <div class="settings-icon settings-icon-blue">
-                <AppWindow class="size-5" />
-              </div>
-              <div class="min-w-0 flex-1">
-                <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.layout.title") }}</h2>
-                <p class="mt-1 text-sm text-slate-500">{{ t("settings.layout.description") }}</p>
-              </div>
-            </div>
-
-            <div class="settings-layout-options">
-              <button
-                v-for="option in panelLayoutOptions"
-                :key="option.value"
-                type="button"
-                class="layout-option-button"
-                :class="{ 'layout-option-button-active': store.panelLayout === option.value }"
-                :aria-pressed="store.panelLayout === option.value"
-                @click="updatePanelLayout(option.value)"
-              >
-                <span class="layout-option-preview" :class="`layout-option-preview-${option.value}`">
-                  <span class="layout-preview-categories">
-                    <span />
-                    <span />
-                    <span />
-                  </span>
-                  <span class="layout-preview-list">
-                    <span />
-                    <span />
-                    <span />
-                    <span />
-                  </span>
-                </span>
-                <span class="layout-option-label">{{ option.label }}</span>
-              </button>
-            </div>
-          </section>
-
-          <section class="settings-panel settings-column-panel">
-            <div class="settings-panel-heading">
+          <div class="settings-panel settings-general-panel">
+            <section class="settings-general-item settings-language-panel">
               <div class="settings-icon settings-icon-teal">
-                <ClipboardPlus class="size-5" />
+                <Sparkles class="size-5" />
               </div>
+
               <div class="min-w-0 flex-1">
-                <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.appendCopy.title") }}</h2>
-                <p class="mt-1 text-sm text-slate-500">{{ t("settings.appendCopy.description", { duration: appendCopyTimeoutText }) }}</p>
+                <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.language.title") }}</h2>
+                <p class="mt-1 text-sm text-slate-500">{{ t("settings.language.description") }}</p>
               </div>
-            </div>
 
-            <div class="segmented-control settings-retention-control">
+              <LanguageSelect
+                class="settings-language-select"
+                :model-value="store.language"
+                :options="languageOptions"
+                :label="t('settings.language.title')"
+                @update:model-value="updateLanguage"
+              />
+            </section>
+
+            <section class="settings-general-item">
+              <div class="settings-icon settings-icon-teal">
+                <Power class="size-5" />
+              </div>
+
+              <div class="min-w-0 flex-1">
+                <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.autostart.title") }}</h2>
+                <p class="mt-1 text-sm text-slate-500">{{ t("settings.autostart.description") }}</p>
+                <p v-if="autostartError" class="mt-2 flex items-start gap-1.5 text-xs leading-5 text-red-700" role="alert">
+                  <AlertCircle class="mt-0.5 size-3.5 shrink-0" />
+                  <span>{{ autostartError }}</span>
+                </p>
+              </div>
+
               <button
-                v-for="option in appendCopyTimeoutOptions"
-                :key="option.value"
                 type="button"
-                class="segmented-option"
-                :class="{ 'segmented-option-active': store.appendCopyTimeoutMinutes === option.value }"
-                @click="updateAppendCopyTimeout(option.value)"
+                role="switch"
+                class="switch-control"
+                :class="{ 'switch-control-active': autostartEnabled }"
+                :aria-label="t('settings.autostart.title')"
+                :aria-checked="autostartEnabled"
+                :aria-busy="isLoadingAutostart || isUpdatingAutostart"
+                :disabled="isLoadingAutostart || isUpdatingAutostart"
+                @click="toggleAutostart"
               >
-                {{ option.label }}
+                <span aria-hidden="true" />
               </button>
-            </div>
-          </section>
+            </section>
 
-          <section class="settings-panel settings-column-panel">
-            <div class="settings-panel-heading">
+            <section class="settings-general-item">
               <div class="settings-icon settings-icon-blue">
-                <Database class="size-5" />
+                <SlidersHorizontal class="size-5" />
               </div>
-              <div class="min-w-0">
-                <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.storage.title") }}</h2>
-                <p class="mt-1 text-sm text-slate-500">{{ t("settings.storage.description", { duration: retentionText }) }}</p>
+
+              <div class="min-w-0 flex-1">
+                <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.openDefault.title") }}</h2>
+                <p class="mt-1 text-sm text-slate-500">{{ t("settings.openDefault.description") }}</p>
               </div>
-            </div>
 
-            <div class="segmented-control settings-retention-control">
-              <button
-                v-for="option in retentionOptions"
-                :key="option.value"
-                type="button"
-                class="segmented-option"
-                :class="{ 'segmented-option-active': store.retentionDays === option.value }"
-                @click="store.updateRetentionDays(option.value)"
-              >
-                {{ option.label }}
-              </button>
-            </div>
-          </section>
+              <div class="segmented-control">
+                <button
+                  v-for="option in panelOpenOptions"
+                  :key="option.value"
+                  type="button"
+                  class="segmented-option segmented-option-with-icon"
+                  :class="{ 'segmented-option-active': store.panelOpenBehavior === option.value }"
+                  @click="updatePanelOpenBehavior(option.value)"
+                >
+                  <component :is="option.icon" class="size-3.5" />
+                  <span>{{ option.label }}</span>
+                </button>
+              </div>
+            </section>
 
+            <section class="settings-general-item settings-general-item-column">
+              <div class="settings-panel-heading">
+                <div class="settings-icon settings-icon-blue">
+                  <AppWindow class="size-5" />
+                </div>
+                <div class="min-w-0 flex-1">
+                  <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.layout.title") }}</h2>
+                  <p class="mt-1 text-sm text-slate-500">{{ t("settings.layout.description") }}</p>
+                </div>
+              </div>
+
+              <div class="settings-layout-options">
+                <button
+                  v-for="option in panelLayoutOptions"
+                  :key="option.value"
+                  type="button"
+                  class="layout-option-button"
+                  :class="{ 'layout-option-button-active': store.panelLayout === option.value }"
+                  :aria-pressed="store.panelLayout === option.value"
+                  @click="updatePanelLayout(option.value)"
+                >
+                  <span class="layout-option-preview" :class="`layout-option-preview-${option.value}`">
+                    <span class="layout-preview-categories">
+                      <span />
+                      <span />
+                      <span />
+                    </span>
+                    <span class="layout-preview-list">
+                      <span />
+                      <span />
+                      <span />
+                      <span />
+                    </span>
+                  </span>
+                  <span class="layout-option-label">{{ option.label }}</span>
+                </button>
+              </div>
+            </section>
+
+            <section class="settings-general-item settings-general-item-column">
+              <div class="settings-panel-heading">
+                <div class="settings-icon settings-icon-teal">
+                  <ClipboardPlus class="size-5" />
+                </div>
+                <div class="min-w-0 flex-1">
+                  <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.appendCopy.title") }}</h2>
+                  <p class="mt-1 text-sm text-slate-500">{{ t("settings.appendCopy.description", { duration: appendCopyTimeoutText }) }}</p>
+                </div>
+              </div>
+
+              <div class="segmented-control settings-retention-control">
+                <button
+                  v-for="option in appendCopyTimeoutOptions"
+                  :key="option.value"
+                  type="button"
+                  class="segmented-option"
+                  :class="{ 'segmented-option-active': store.appendCopyTimeoutMinutes === option.value }"
+                  @click="updateAppendCopyTimeout(option.value)"
+                >
+                  {{ option.label }}
+                </button>
+              </div>
+            </section>
+
+            <section class="settings-general-item settings-general-item-column">
+              <div class="settings-panel-heading">
+                <div class="settings-icon settings-icon-blue">
+                  <Database class="size-5" />
+                </div>
+                <div class="min-w-0">
+                  <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.storage.title") }}</h2>
+                  <p class="mt-1 text-sm text-slate-500">{{ t("settings.storage.description", { duration: retentionText }) }}</p>
+                </div>
+              </div>
+
+              <div class="segmented-control settings-retention-control">
+                <button
+                  v-for="option in retentionOptions"
+                  :key="option.value"
+                  type="button"
+                  class="segmented-option"
+                  :class="{ 'segmented-option-active': store.retentionDays === option.value }"
+                  @click="store.updateRetentionDays(option.value)"
+                >
+                  {{ option.label }}
+                </button>
+              </div>
+            </section>
+          </div>
         </div>
 
         <div v-else-if="activeTab === 'shortcuts'" class="settings-section">
-          <section class="settings-panel settings-column-panel">
-            <div class="settings-panel-heading">
-              <div class="settings-icon settings-icon-teal">
-                <Keyboard class="size-5" />
-              </div>
-              <div class="min-w-0 flex-1">
-                <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.shortcuts.global.title") }}</h2>
-                <p class="mt-1 text-sm text-slate-500">{{ t("settings.shortcuts.global.description") }}</p>
-              </div>
-            </div>
-
-            <div class="settings-shortcut-recorder">
-              <button
-                type="button"
-                class="shortcut-capture-button"
-                :class="{ 'shortcut-capture-button-recording': shortcutRecording }"
-                :aria-pressed="shortcutRecording"
-                @click="startRecordingShortcut"
-              >
-                <Keyboard class="size-4" />
-                <span>{{ shortcutRecording ? t("settings.shortcuts.recording") : formattedShortcutDraft }}</span>
-              </button>
-
-              <button
-                type="button"
-                class="settings-action-button"
-                :disabled="isSavingShortcut"
-                @click="restoreDefaultShortcut"
-              >
-                <RotateCcw class="size-4" />
-                <span>{{ t("settings.shortcuts.restoreDefault") }}</span>
-              </button>
-
-              <button
-                type="button"
-                class="settings-action-button settings-action-button-primary"
-                :disabled="!canSaveShortcut"
-                @click="saveShortcut"
-              >
-                <Save class="size-4" />
-                <span>{{ isSavingShortcut ? t("common.saving") : t("common.save") }}</span>
-              </button>
-            </div>
-
-            <p
-              v-if="shortcutError || shortcutMessage"
-              class="settings-message"
-              :class="{ 'settings-message-error': shortcutError }"
-            >
-              <CheckCircle2 v-if="shortcutMessage && !shortcutError" class="size-4" />
-              <AlertCircle v-else class="size-4" />
-              <span>{{ shortcutError || shortcutMessage }}</span>
-            </p>
-          </section>
-
-          <section class="settings-panel settings-column-panel">
-            <div class="settings-panel-heading">
-              <div class="settings-icon settings-icon-blue">
-                <Keyboard class="size-5" />
-              </div>
-              <div class="min-w-0 flex-1">
-                <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.shortcuts.panel.title") }}</h2>
-                <p class="mt-1 text-sm text-slate-500">{{ t("settings.shortcuts.panel.description") }}</p>
-              </div>
-            </div>
-
-            <div class="settings-shortcut-list">
-              <div v-for="shortcut in fixedShortcuts" :key="shortcut.action" class="settings-shortcut-row">
-                <div class="shortcut-kbd-group" aria-hidden="true">
-                  <kbd v-for="key in shortcut.keys" :key="key" class="shortcut-kbd">{{ key }}</kbd>
+          <div class="settings-panel settings-shortcuts-panel">
+            <section class="settings-shortcuts-item settings-shortcuts-item-column">
+              <div class="settings-panel-heading">
+                <div class="settings-icon settings-icon-teal">
+                  <Keyboard class="size-5" />
                 </div>
-                <span>{{ shortcut.action }}</span>
+                <div class="min-w-0 flex-1">
+                  <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.shortcuts.global.title") }}</h2>
+                  <p class="mt-1 text-sm text-slate-500">{{ t("settings.shortcuts.global.description") }}</p>
+                </div>
               </div>
-            </div>
-          </section>
+
+              <div class="settings-shortcut-recorder">
+                <button
+                  type="button"
+                  class="shortcut-capture-button"
+                  :class="{ 'shortcut-capture-button-recording': shortcutRecording }"
+                  :aria-pressed="shortcutRecording"
+                  @click="startRecordingShortcut"
+                >
+                  <Keyboard class="size-4" />
+                  <span>{{ shortcutRecording ? t("settings.shortcuts.recording") : formattedShortcutDraft }}</span>
+                </button>
+
+                <button
+                  type="button"
+                  class="settings-action-button"
+                  :disabled="isSavingShortcut"
+                  @click="restoreDefaultShortcut"
+                >
+                  <RotateCcw class="size-4" />
+                  <span>{{ t("settings.shortcuts.restoreDefault") }}</span>
+                </button>
+
+                <button
+                  type="button"
+                  class="settings-action-button settings-action-button-primary"
+                  :disabled="!canSaveShortcut"
+                  @click="saveShortcut"
+                >
+                  <Save class="size-4" />
+                  <span>{{ isSavingShortcut ? t("common.saving") : t("common.save") }}</span>
+                </button>
+              </div>
+
+              <p
+                v-if="shortcutError || shortcutMessage"
+                class="settings-message"
+                :class="{ 'settings-message-error': shortcutError }"
+              >
+                <CheckCircle2 v-if="shortcutMessage && !shortcutError" class="size-4" />
+                <AlertCircle v-else class="size-4" />
+                <span>{{ shortcutError || shortcutMessage }}</span>
+              </p>
+            </section>
+
+            <section class="settings-shortcuts-item settings-shortcuts-item-column">
+              <div class="settings-panel-heading">
+                <div class="settings-icon settings-icon-blue">
+                  <Keyboard class="size-5" />
+                </div>
+                <div class="min-w-0 flex-1">
+                  <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.shortcuts.panel.title") }}</h2>
+                  <p class="mt-1 text-sm text-slate-500">{{ t("settings.shortcuts.panel.description") }}</p>
+                </div>
+              </div>
+
+              <div class="settings-shortcut-list">
+                <div v-for="shortcut in fixedShortcuts" :key="shortcut.action" class="settings-shortcut-row">
+                  <div class="shortcut-kbd-group" aria-hidden="true">
+                    <kbd v-for="key in shortcut.keys" :key="key" class="shortcut-kbd">{{ key }}</kbd>
+                  </div>
+                  <span>{{ shortcut.action }}</span>
+                </div>
+              </div>
+            </section>
+          </div>
         </div>
 
         <div v-else-if="activeTab === 'ocr'" class="settings-section">
@@ -931,15 +1016,18 @@ function formatBytes(bytes: number) {
 
         <div v-else class="settings-section">
           <section class="settings-panel settings-about-panel">
-            <div class="settings-about-header">
-              <div class="settings-icon settings-icon-violet">
+            <header class="about-identity">
+              <div class="about-identity-icon">
                 <Sparkles class="size-5" />
               </div>
-              <div class="min-w-0">
-                <h2 class="text-sm font-semibold text-slate-950">iPaste</h2>
-                <p class="mt-1 text-sm text-slate-500">{{ t("settings.about.description") }}</p>
+              <div class="about-identity-copy">
+                <div class="about-identity-heading">
+                  <h2>iPaste</h2>
+                  <span class="about-version-badge">v{{ appInfo?.version ?? "0.1.0" }}</span>
+                </div>
+                <p>{{ t("settings.about.description") }}</p>
               </div>
-            </div>
+            </header>
 
             <section class="about-update-panel" :class="{ 'about-update-panel-error': updater.updateStatus.value === 'error' }">
               <div class="about-update-copy">
@@ -950,10 +1038,7 @@ function formatBytes(bytes: number) {
                   <RefreshCw v-else class="size-4" />
                 </div>
                 <div class="min-w-0">
-                  <div class="about-update-heading">
-                    <h3 class="about-update-title">{{ t("settings.about.softwareUpdate") }}</h3>
-                    <span class="about-version-badge">v{{ appInfo?.version ?? "0.1.0" }}</span>
-                  </div>
+                  <h3 class="about-update-title">{{ t("settings.about.softwareUpdate") }}</h3>
                   <p>{{ updater.updateSummaryText.value }}</p>
                 </div>
               </div>
@@ -962,15 +1047,42 @@ function formatBytes(bytes: number) {
                 type="button"
                 class="settings-action-button settings-action-button-primary about-update-button"
                 :disabled="updater.isUpdateBusy.value"
-                @click="updater.checkForUpdate()"
+                @click="updater.openUpdateDialog"
               >
-                <RefreshCw class="size-4" :class="{ 'update-spin': updater.updateStatus.value === 'checking' }" />
+                <ChevronRight
+                  v-if="updater.updateStatus.value === 'available' || updater.updateStatus.value === 'ready'"
+                  class="size-4"
+                />
+                <RefreshCw
+                  v-else
+                  class="size-4"
+                  :class="{ 'update-spin': updater.updateStatus.value === 'checking' }"
+                />
                 <span>{{ updater.updateButtonText.value }}</span>
               </button>
             </section>
 
-            <div>
-              <h3 class="about-label">{{ t("settings.about.techStack") }}</h3>
+            <section class="about-project-repository">
+              <Github class="about-project-icon size-5" aria-hidden="true" />
+              <div class="about-repository-copy">
+                <h3 class="about-repository-title">{{ t("settings.about.repositoryTitle") }}</h3>
+                <button type="button" class="about-repository-link" @click="openSourceRepository">
+                  <span>{{ IPASTE_GITHUB_REPOSITORY_URL.replace("https://", "") }}</span>
+                  <ExternalLink class="size-3.5" />
+                </button>
+                <p>{{ t("settings.about.starDescription") }}</p>
+              </div>
+              <button
+                type="button"
+                class="settings-action-button settings-action-button-primary about-star-button"
+                @click="openSourceRepository"
+              >
+                <span>{{ t("settings.about.starAction") }}</span>
+              </button>
+            </section>
+
+            <section class="about-tech-section">
+              <h3 class="about-section-title">{{ t("settings.about.techStack") }}</h3>
               <div class="tech-stack-grid">
                 <div v-for="item in techStack" :key="item.name" class="tech-stack-item">
                   <div class="tech-stack-icon" :class="`tech-stack-icon-${item.tone}`">
@@ -982,7 +1094,7 @@ function formatBytes(bytes: number) {
                   </div>
                 </div>
               </div>
-            </div>
+            </section>
           </section>
         </div>
       </div>

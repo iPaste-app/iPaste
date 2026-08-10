@@ -21,6 +21,7 @@
     },
     "clipboard-manager:default",
     "global-shortcut:default",
+    "autostart:default",
     "updater:default",
     "process:allow-restart"
   ]

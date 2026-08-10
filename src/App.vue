@@ -1,28 +1,37 @@
 <script setup lang="ts">
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import { AlertCircle, ChevronRight, ClipboardCopy, CornerDownLeft, FolderInput, Inbox, Pencil, Plus, Trash2, X } from "lucide-vue-next";
+import { AlertCircle, CheckCircle2, ChevronRight, ClipboardCopy, CornerDownLeft, FolderInput, Inbox, Pencil, Plus, Trash2, X } from "lucide-vue-next";
 import CategoryRail from "./components/CategoryRail.vue";
 import ClipCard from "./components/ClipCard.vue";
 import ClipViewerWindow from "./components/ClipViewerWindow.vue";
 import SettingsWindow from "./components/SettingsWindow.vue";
+import StarPrompt from "./components/StarPrompt.vue";
 import TopBar from "./components/TopBar.vue";
 import UpdateDialog from "./components/UpdateDialog.vue";
 import { useUpdater } from "./composables/useUpdater";
-import { t } from "./i18n";
+import { cleanLanguage, setLanguage, t } from "./i18n";
 import { clipImageSrc } from "./lib/clipMedia";
 import { categoryDisplayName, clipMetricText, formatShortcut, formatTime, typeLabel } from "./lib/format";
 import { ipasteApi } from "./lib/ipasteApi";
+import { openGitHubRepository } from "./lib/starPrompt";
 import { useIpasteStore } from "./stores/ipasteStore";
 import type { Category, ClipViewItem } from "./types";
 
 const CATEGORY_COLORS = ["#0D9488", "#2563EB", "#7C3AED", "#D97706", "#DC2626", "#475569"];
 const store = useIpasteStore();
 const updater = useUpdater();
-const isSettingsWindow = new URLSearchParams(window.location.search).get("window") === "settings";
-const isClipViewerWindow = new URLSearchParams(window.location.search).get("window") === "clip-viewer";
+const windowSearchParams = new URLSearchParams(window.location.search);
+const isSettingsWindow = windowSearchParams.get("window") === "settings";
+const isClipViewerWindow = windowSearchParams.get("window") === "clip-viewer";
+const isStarPromptPreview = import.meta.env.DEV && windowSearchParams.get("preview") === "star-prompt";
+const starPromptPreviewLanguage = windowSearchParams.get("preview-language");
 const isMacOs = /mac/i.test(navigator.platform) || /Mac OS/i.test(navigator.userAgent);
 const isPreservingCurrentApp = ref(false);
+const showStarPrompt = ref(false);
+const isStarPromptBusy = ref(false);
+const showStarThanks = ref(false);
 const contextMenu = ref<{ item: ClipViewItem; index: number; x: number; y: number } | null>(null);
 const contextMenuElement = ref<HTMLElement | null>(null);
 const moveSubmenuBranchElement = ref<HTMLElement | null>(null);
@@ -68,6 +77,9 @@ let clipListScrollTimer: number | null = null;
 let selectionScrollFrame: number | null = null;
 let searchReloadTimer: number | null = null;
 let quickPreviewOpenTimer: number | null = null;
+let starPromptTimer: number | null = null;
+let starThanksTimer: number | null = null;
+let starPromptRequestId = 0;
 let lastUpdateCheckAt = 0;
 let suppressNextItemSelect = false;
 let suppressQuickPreviewUntilModifierUp = false;
@@ -144,6 +156,9 @@ onMounted(async () => {
   document.addEventListener("visibilitychange", handleVisibilityChange);
 
   await store.load();
+  if (isStarPromptPreview && starPromptPreviewLanguage) {
+    setLanguage(cleanLanguage(starPromptPreviewLanguage), { persist: false });
+  }
   await store.bindEvents();
   if (isTauri) {
     scheduleSilentUpdateCheck();
@@ -159,6 +174,9 @@ onMounted(async () => {
         applyPanelVisibility(event.payload);
       },
     );
+  }
+  if (!isTauri || (await getCurrentWindow().isVisible().catch(() => false))) {
+    scheduleStarPromptForPanelOpen();
   }
 });
 
@@ -176,6 +194,8 @@ onUnmounted(() => {
   clearSelectionScrollFrame();
   clearSearchReloadTimer();
   clearQuickPreviewTimer();
+  clearStarPromptTimer();
+  clearStarThanksTimer();
   cleanupItemDrag();
   unlistenShortcutOpened?.();
   unlistenPanelKey?.();
@@ -214,6 +234,10 @@ function applyPanelVisibility(
   const nativePanel = payload.visible && Boolean(payload.nativePanel);
   isPreservingCurrentApp.value = payload.visible && payload.preservesCurrentApp && !nativePanel;
   if (!payload.visible) {
+    clearStarPromptTimer();
+    clearStarThanksTimer();
+    showStarPrompt.value = false;
+    showStarThanks.value = false;
     store.clearSearch();
     resetClipListScroll();
     blurActiveElement();
@@ -228,6 +252,95 @@ function applyPanelVisibility(
   }
   blurCategoryFocus();
   scheduleSilentUpdateCheck();
+  scheduleStarPromptForPanelOpen();
+}
+
+function scheduleStarPromptForPanelOpen() {
+  clearStarPromptTimer();
+  if (isStarPromptPreview) {
+    showStarPrompt.value = true;
+    return;
+  }
+  if (showStarPrompt.value || updater.updateDialogOpen.value) return;
+
+  const requestId = ++starPromptRequestId;
+  starPromptTimer = window.setTimeout(() => {
+    starPromptTimer = null;
+    void refreshStarPromptVisibility(requestId);
+  }, 320);
+}
+
+async function refreshStarPromptVisibility(requestId: number) {
+  if (updater.updateDialogOpen.value) return;
+
+  try {
+    const state = await ipasteApi.starPromptState();
+    if (requestId !== starPromptRequestId || updater.updateDialogOpen.value) return;
+    showStarPrompt.value = state.shouldShow;
+  } catch {
+    if (requestId === starPromptRequestId) {
+      showStarPrompt.value = false;
+    }
+  }
+}
+
+function clearStarPromptTimer() {
+  starPromptRequestId += 1;
+  if (starPromptTimer === null) return;
+  window.clearTimeout(starPromptTimer);
+  starPromptTimer = null;
+}
+
+function clearStarThanksTimer() {
+  if (starThanksTimer === null) return;
+  window.clearTimeout(starThanksTimer);
+  starThanksTimer = null;
+}
+
+function showStarThanksMessage() {
+  clearStarThanksTimer();
+  showStarThanks.value = true;
+  starThanksTimer = window.setTimeout(() => {
+    starThanksTimer = null;
+    showStarThanks.value = false;
+  }, 1800);
+}
+
+function hideStarSupport() {
+  showStarPrompt.value = false;
+}
+
+async function openStarSupport() {
+  if (isStarPromptBusy.value) return;
+  isStarPromptBusy.value = true;
+  try {
+    await openGitHubRepository();
+  } finally {
+    isStarPromptBusy.value = false;
+  }
+}
+
+async function confirmStarredSupport() {
+  if (isStarPromptBusy.value) return;
+  isStarPromptBusy.value = true;
+  try {
+    await ipasteApi.markStarPromptStarred();
+    showStarPrompt.value = false;
+    showStarThanksMessage();
+  } finally {
+    isStarPromptBusy.value = false;
+  }
+}
+
+async function snoozeStarSupport() {
+  if (isStarPromptBusy.value) return;
+  isStarPromptBusy.value = true;
+  try {
+    await ipasteApi.snoozeStarPrompt();
+    showStarPrompt.value = false;
+  } finally {
+    isStarPromptBusy.value = false;
+  }
 }
 
 async function createCategory() {
@@ -680,6 +793,22 @@ async function openClipViewer(item: ClipViewItem) {
 function handleKeydown(event: KeyboardEvent) {
   if (event.defaultPrevented) return;
 
+  if (showStarPrompt.value && event.target instanceof HTMLElement && event.target.closest(".star-prompt")) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      hideStarSupport();
+    }
+    return;
+  }
+
+  if (showStarPrompt.value && event.key === "Escape") {
+    event.preventDefault();
+    hideStarSupport();
+    return;
+  }
+
+  if (showStarPrompt.value && event.key === "Tab") return;
+
   if (quickPreviewItem.value) {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -748,6 +877,11 @@ function hasQuickPreviewModifier(event: KeyboardEvent) {
 type PanelKey = "ArrowDown" | "ArrowUp" | "ArrowRight" | "ArrowLeft" | "Enter" | "Escape";
 
 function handlePanelKey(key: string) {
+  if (showStarPrompt.value && key === "Escape") {
+    hideStarSupport();
+    return true;
+  }
+
   if (contextMenu.value) {
     if (key === "Escape") {
       closeFloatingLayers();
@@ -1053,6 +1187,21 @@ function scrollSelectedClipIntoView() {
         @install="updater.installAvailableUpdate"
         @relaunch="updater.relaunchForUpdate"
       />
+
+      <StarPrompt
+        :open="showStarPrompt"
+        :busy="isStarPromptBusy"
+        @already-starred="confirmStarredSupport"
+        @open-repository="openStarSupport"
+        @snooze="snoozeStarSupport"
+      />
+
+      <Transition name="star-thanks-toast">
+        <div v-if="showStarThanks" class="star-thanks-toast" role="status" aria-live="polite">
+          <CheckCircle2 class="size-4" aria-hidden="true" />
+          <span>{{ t("starPrompt.thanks") }}</span>
+        </div>
+      </Transition>
 
       <section
         class="main-content"
