@@ -3592,9 +3592,7 @@ fn show_main_window_with_native_panel(
             let Some(content_view) = panel.contentView() else {
                 return Err("无法创建原生主面板内容视图".to_string());
             };
-            webview_view.removeFromSuperview();
-            content_view.addSubview(webview_view);
-            fit_webview_to_content_view(webview_view, &content_view);
+            attach_main_webview_to_content_view(webview_view, &content_view);
 
             host_window.orderOut(None);
             panel.orderFrontRegardless();
@@ -3688,6 +3686,19 @@ fn set_native_panel_clear_background(panel: &NSPanel) {
 }
 
 #[cfg(target_os = "macos")]
+fn attach_main_webview_to_content_view(webview_view: &NSView, content_view: &NSView) {
+    let already_attached = unsafe { webview_view.superview() }
+        .is_some_and(|parent| std::ptr::eq(parent.as_ref(), content_view));
+    // Keep WKWebView's scrolling layers attached when reopening the same panel.
+    // Only transfer the view when switching between the panel and its Tauri host.
+    if !already_attached {
+        webview_view.removeFromSuperview();
+        content_view.addSubview(webview_view);
+    }
+    fit_webview_to_content_view(webview_view, content_view);
+}
+
+#[cfg(target_os = "macos")]
 fn fit_webview_to_content_view(webview_view: &NSView, content_view: &NSView) {
     let content_frame = content_view.frame();
     webview_view.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), content_frame.size));
@@ -3727,9 +3738,7 @@ fn restore_main_webview_to_host_window(
             let Some(content_view) = host_window.contentView() else {
                 return Err("无法还原主面板内容视图".to_string());
             };
-            webview_view.removeFromSuperview();
-            content_view.addSubview(webview_view);
-            fit_webview_to_content_view(webview_view, &content_view);
+            attach_main_webview_to_content_view(webview_view, &content_view);
             let _ = host_window.makeFirstResponder(Some(webview_responder));
 
             let mut guard = panel_state.lock().map_err(|error| error.to_string())?;

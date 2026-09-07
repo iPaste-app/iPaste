@@ -74,6 +74,7 @@ let unlistenPanelVisibilityChanged: UnlistenFn | null = null;
 let unlistenPanelKey: UnlistenFn | null = null;
 let moveSubmenuCloseTimer: number | null = null;
 let clipListScrollTimer: number | null = null;
+let clipListResetFrame: number | null = null;
 let selectionScrollFrame: number | null = null;
 let searchReloadTimer: number | null = null;
 let quickPreviewOpenTimer: number | null = null;
@@ -83,6 +84,7 @@ let starPromptRequestId = 0;
 let lastUpdateCheckAt = 0;
 let suppressNextItemSelect = false;
 let suppressQuickPreviewUntilModifierUp = false;
+let isPanelVisible = true;
 
 const categoryById = computed(() =>
   store.categories.reduce<Record<string, Category>>((categories, category) => {
@@ -191,6 +193,7 @@ onUnmounted(() => {
   document.removeEventListener("visibilitychange", handleVisibilityChange);
   clearMoveSubmenuCloseTimer();
   clearClipListScrollTimer();
+  clearClipListResetFrame();
   clearSelectionScrollFrame();
   clearSearchReloadTimer();
   clearQuickPreviewTimer();
@@ -230,6 +233,7 @@ function applyPanelVisibility(
   payload: { visible: boolean; preservesCurrentApp: boolean; nativePanel?: boolean },
   activateDefault = false,
 ) {
+  isPanelVisible = payload.visible;
   closeFloatingLayers();
   const nativePanel = payload.visible && Boolean(payload.nativePanel);
   isPreservingCurrentApp.value = payload.visible && payload.preservesCurrentApp && !nativePanel;
@@ -238,8 +242,11 @@ function applyPanelVisibility(
     clearStarThanksTimer();
     showStarPrompt.value = false;
     showStarThanks.value = false;
+    clearClipListResetFrame();
+    clearSelectionScrollFrame();
+    clearClipListScrollTimer();
+    isClipListScrolling.value = false;
     store.clearSearch();
-    resetClipListScroll();
     blurActiveElement();
     return;
   }
@@ -247,6 +254,7 @@ function applyPanelVisibility(
   if (activateDefault) {
     store.activatePanelDefault();
   }
+  scheduleClipListScrollReset();
   if (!nativePanel) {
     scheduleActiveElementBlur();
   }
@@ -1054,6 +1062,7 @@ function showClipListScrollbar() {
 }
 
 function handleClipListScroll() {
+  if (!isPanelVisible) return;
   showClipListScrollbar();
 
   const list = clipListElement.value;
@@ -1071,13 +1080,24 @@ function clearClipListScrollTimer() {
   clipListScrollTimer = null;
 }
 
-function resetClipListScroll() {
-  clearClipListScrollTimer();
-  isClipListScrolling.value = false;
+function scheduleClipListScrollReset() {
+  clearClipListResetFrame();
+  // WKWebView can suspend its scrolling layers while the native panel is hidden.
+  // Reset after showing it, even when selectedIndex was already zero and no watcher ran.
+  clipListResetFrame = window.requestAnimationFrame(() => {
+    clipListResetFrame = null;
+    clearClipListScrollTimer();
+    isClipListScrolling.value = false;
+    if (clipListElement.value) {
+      clipListElement.value.scrollTop = 0;
+    }
+  });
+}
 
-  if (clipListElement.value) {
-    clipListElement.value.scrollTop = 0;
-  }
+function clearClipListResetFrame() {
+  if (clipListResetFrame === null) return;
+  window.cancelAnimationFrame(clipListResetFrame);
+  clipListResetFrame = null;
 }
 
 function positionMoveSubmenu() {
@@ -1099,6 +1119,7 @@ function clamp(value: number, min: number, max: number) {
 
 function scheduleSelectedClipScroll() {
   clearSelectionScrollFrame();
+  if (!isPanelVisible) return;
   selectionScrollFrame = window.requestAnimationFrame(() => {
     selectionScrollFrame = null;
     scrollSelectedClipIntoView();
