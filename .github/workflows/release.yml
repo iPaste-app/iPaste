@@ -60,6 +60,16 @@ jobs:
           IPASTE_OCR_R2_BASE_URL: ${{ secrets.IPASTE_OCR_R2_BASE_URL }}
         run: node scripts/configure-updater-endpoints.mjs
 
+      - name: Read release notes
+        id: release-notes
+        uses: actions/github-script@v7
+        with:
+          result-encoding: string
+          script: |
+            const fs = require('node:fs');
+            const { version } = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            return fs.readFileSync(`releases/v${version}.md`, 'utf8');
+
       - name: Build and publish Tauri app
         id: tauri-build
         uses: tauri-apps/tauri-action@v0.6.2
@@ -73,7 +83,7 @@ jobs:
           releaseCommitish: main
           tagName: iPaste-v__VERSION__
           releaseName: iPaste v__VERSION__
-          releaseBody: ""
+          releaseBody: ${{ steps.release-notes.outputs.result }}
           releaseDraft: false
           prerelease: false
           tauriScript: npm run tauri
