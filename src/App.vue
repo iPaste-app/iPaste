@@ -799,7 +799,7 @@ async function openClipViewer(item: ClipViewItem) {
 }
 
 function handleKeydown(event: KeyboardEvent) {
-  if (event.defaultPrevented) return;
+  if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
 
   if (showStarPrompt.value && event.target instanceof HTMLElement && event.target.closest(".star-prompt")) {
     if (event.key === "Escape") {

@@ -39,7 +39,11 @@ const imageSrc = computed(() => clipImageSrc(props.item));
 const colorPreviewValue = computed(() => props.item.text.trim());
 const displayTitle = computed(() => props.item.displayName?.trim() || "");
 const headerLabel = computed(() => displayTitle.value || typeLabel(props.item.clipType));
-const previewContent = computed(() => props.item.text || props.item.previewText);
+// Keep full clipboard content for copying/viewing, but never lay it all out in a card.
+const contentText = computed(() => props.item.text);
+const clipType = computed(() => props.item.clipType);
+const previewText = computed(() => props.item.previewText);
+const previewContent = computed(() => (contentText.value || previewText.value).slice(0, 500));
 const shouldFadePreview = computed(() => previewContent.value.length > 28 || previewContent.value.includes("\n"));
 const categoryTagLabel = computed(() => {
   if (props.item.collection !== "history") return "";
@@ -57,7 +61,7 @@ const categoryTagColor = computed(() => {
 const displayTime = computed(() =>
   props.item.collection === "history" ? props.item.lastCapturedAt : props.item.createdAt,
 );
-const metricText = computed(() => clipMetricText(props.item.clipType, props.item.text, props.item.previewText));
+const metricText = computed(() => clipMetricText(clipType.value, contentText.value, previewText.value));
 
 const iconComponent = computed(() => {
   if (props.item.clipType === "link") return Link;

@@ -2332,17 +2332,22 @@ fn get_snapshot(state: tauri::State<'_, AppState>) -> Result<AppSnapshot, String
 }
 
 #[tauri::command]
-fn list_clips(
+async fn list_clips(
     state: tauri::State<'_, AppState>,
     offset: Option<usize>,
     limit: Option<usize>,
     search: Option<String>,
 ) -> Result<ClipPage, String> {
-    state.store.list_clips(
-        offset.unwrap_or(0),
-        limit.unwrap_or(CLIP_PAGE_SIZE),
-        search.unwrap_or_default(),
-    )
+    let store = state.store.clone();
+    tokio::task::spawn_blocking(move || {
+        store.list_clips(
+            offset.unwrap_or(0),
+            limit.unwrap_or(CLIP_PAGE_SIZE),
+            search.unwrap_or_default(),
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

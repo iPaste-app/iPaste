@@ -60,20 +60,26 @@ export const useIpasteStore = defineStore("ipaste", () => {
   });
   let backgroundSyncTimer: number | null = null;
   let clipRequestId = 0;
+  let loadedClipSearch = "";
+  let isReloadingClips = false;
 
   const activeCategory = computed(() =>
     categories.value.find((category) => category.id === selectedCategoryId.value),
   );
 
+  // Keep card objects stable while typing; only rebuild them when their source changes.
+  const sourceItems = computed<ClipViewItem[]>(() => {
+    if (selectedCategoryId.value === "history") {
+      return clips.value.map((clip) => ({ ...clip, collection: "history" as const }));
+    }
+    return categoryItems.value
+      .filter((item) => item.categoryId === selectedCategoryId.value)
+      .map((item) => ({ ...item, collection: "category" as const }));
+  });
+
   const visibleItems = computed<ClipViewItem[]>(() => {
     const query = search.value.trim().toLowerCase();
-    const source =
-      selectedCategoryId.value === "history"
-        ? clips.value.map((clip) => ({ ...clip, collection: "history" as const }))
-        : categoryItems.value
-            .filter((item) => item.categoryId === selectedCategoryId.value)
-            .map((item) => ({ ...item, collection: "category" as const }));
-
+    const source = sourceItems.value;
     if (!query) return source;
 
     return source.filter((item) =>
@@ -95,6 +101,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
     try {
       const snapshot = await ipasteApi.snapshot();
       clips.value = snapshot.clips;
+      loadedClipSearch = "";
       hasMoreClips.value = snapshot.hasMoreClips;
       clipTotalCount.value = snapshot.clipTotalCount;
       visibleHistoryTotalCount.value = snapshot.clipTotalCount;
@@ -183,10 +190,14 @@ export const useIpasteStore = defineStore("ipaste", () => {
 
   async function loadMoreClips() {
     if (selectedCategoryId.value !== "history" || isLoadingMoreClips.value || !hasMoreClips.value) return;
+    if (isReloadingClips || search.value !== loadedClipSearch) return;
 
+    const requestId = clipRequestId;
+    const query = search.value;
     isLoadingMoreClips.value = true;
     try {
-      const page = await ipasteApi.listClips(clips.value.length, CLIP_PAGE_SIZE, search.value);
+      const page = await ipasteApi.listClips(clips.value.length, CLIP_PAGE_SIZE, query);
+      if (requestId !== clipRequestId || query !== search.value) return;
       const existingIds = new Set(clips.value.map((clip) => clip.id));
       clips.value = [
         ...clips.value,
@@ -197,28 +208,36 @@ export const useIpasteStore = defineStore("ipaste", () => {
       clipTotalCount.value = page.allCount;
       clampSelection();
     } catch (unknownError) {
-      error.value = String(unknownError);
+      if (requestId === clipRequestId && query === search.value) {
+        error.value = String(unknownError);
+      }
     } finally {
-      isLoadingMoreClips.value = false;
+      if (requestId === clipRequestId) isLoadingMoreClips.value = false;
     }
   }
 
   async function reloadClips() {
     const requestId = ++clipRequestId;
+    const query = search.value;
+    isReloadingClips = true;
+    isLoadingMoreClips.value = false;
 
     try {
-      const page = await ipasteApi.listClips(0, CLIP_PAGE_SIZE, search.value);
-      if (requestId !== clipRequestId) return;
+      const page = await ipasteApi.listClips(0, CLIP_PAGE_SIZE, query);
+      if (requestId !== clipRequestId || query !== search.value) return;
 
       clips.value = page.clips;
+      loadedClipSearch = query;
       hasMoreClips.value = page.hasMore;
       visibleHistoryTotalCount.value = page.totalCount;
       clipTotalCount.value = page.allCount;
       selectedIndex.value = 0;
     } catch (unknownError) {
-      if (requestId === clipRequestId) {
+      if (requestId === clipRequestId && query === search.value) {
         error.value = String(unknownError);
       }
+    } finally {
+      if (requestId === clipRequestId) isReloadingClips = false;
     }
   }
 

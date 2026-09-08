@@ -6,7 +6,7 @@ import { t } from "../i18n";
 
 const logoUrl = new URL("../../src-tauri/icons/32x32.png", import.meta.url).href;
 
-defineProps<{
+const props = defineProps<{
   modelValue: string;
   shortcut: string;
   settingsOpen: boolean;
@@ -26,6 +26,18 @@ const emit = defineEmits<{
 
 const isTauri = "__TAURI_INTERNALS__" in window;
 let dragReleaseTimer: number | null = null;
+let isComposing = false;
+
+function updateSearch(event: Event) {
+  if (isComposing || (event as InputEvent).isComposing) return;
+  const value = (event.target as HTMLInputElement).value;
+  if (value !== props.modelValue) emit("update:modelValue", value);
+}
+
+function finishComposition(event: CompositionEvent) {
+  isComposing = false;
+  updateSearch(event);
+}
 
 async function startWindowDrag(event: MouseEvent) {
   if (!isTauri || event.button !== 0) return;
@@ -78,7 +90,9 @@ function startMainWindowDrag() {
         tabindex="-1"
         :placeholder="t('topBar.searchPlaceholder')"
         spellcheck="false"
-        @input="emit('update:modelValue', ($event.target as HTMLInputElement).value)"
+        @compositionstart="isComposing = true"
+        @compositionend="finishComposition"
+        @input="updateSearch"
       />
     </label>
 

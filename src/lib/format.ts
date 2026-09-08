@@ -72,7 +72,10 @@ function countCharacters(text: string) {
         }).Segmenter(currentLocale.value, { granularity: "grapheme" })
       : null;
 
-  return segmenter ? [...segmenter.segment(text)].length : Array.from(text).length;
+  // Count without allocating an array of segment objects for the entire clipboard.
+  let count = 0;
+  for (const _segment of segmenter ? segmenter.segment(text) : text) count += 1;
+  return count;
 }
 
 export function syncStateLabel(value: string) {
