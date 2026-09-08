@@ -22,6 +22,8 @@ import {
 } from "lucide-vue-next";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { clipImageSrc } from "../lib/clipMedia";
+import OcrSetupGuide from "./OcrSetupGuide.vue";
+import { getOcrErrorMessage, getOcrModelIssue, type OcrModelIssue } from "../lib/ocrError";
 import { t } from "../i18n";
 import { clipViewerStorageKey, ipasteApi } from "../lib/ipasteApi";
 import { clipMetricText, formatTime, textStats, typeLabel } from "../lib/format";
@@ -81,6 +83,7 @@ const isImageDragging = ref(false);
 const isRecognizingImage = ref(false);
 const imageOcrResult = ref<ImageOcrResult | null>(null);
 const imageOcrError = ref<string | null>(null);
+const imageOcrIssue = ref<OcrModelIssue | null>(null);
 const imageOcrSelection = ref<OcrSelectionRange | null>(null);
 const isImageOcrPanelCollapsed = ref(false);
 const showClosePrompt = ref(false);
@@ -114,7 +117,9 @@ const title = computed(() => {
 });
 const isImage = computed(() => item.value?.clipType === "image");
 const imageSrc = computed(() => (item.value ? clipImageSrc(item.value) : ""));
-const showImageOcrPanel = computed(() => isImage.value && (isRecognizingImage.value || Boolean(imageOcrResult.value) || Boolean(imageOcrError.value)));
+const showImageOcrPanel = computed(() => isImage.value && (
+  isRecognizingImage.value || Boolean(imageOcrResult.value) || Boolean(imageOcrError.value) || Boolean(imageOcrIssue.value)
+));
 const hasChanged = computed(() => Boolean(item.value && draftText.value !== item.value.text));
 const stats = computed(() => (item.value ? textStats(draftText.value) : ""));
 const metricText = computed(() => (item.value ? clipMetricText(item.value.clipType, draftText.value, item.value.previewText) : ""));
@@ -160,15 +165,8 @@ const ocrTextLayerStyle = computed(() => {
     transform: `rotate(${imageRotation.value}deg) scale(${imageScale.value})`,
   };
 });
-const imageOcrSummary = computed(() => {
-  if (!imageOcrResult.value) return "";
-  return t("viewer.ocrSummary", {
-    count: imageOcrResult.value.words.length,
-    language: imageOcrResult.value.language,
-  });
-});
 const imageOcrLoadingText = computed(() =>
-  isMacOs ? t("viewer.ocrLoading.macos") : t("viewer.ocrLoading.tesseract"),
+  isMacOs ? t("viewer.ocrLoading.macos") : t("viewer.ocrLoading.paddle"),
 );
 const imageOcrLines = computed<OcrLine[]>(() => {
   const words = imageOcrResult.value?.words ?? [];
@@ -967,6 +965,7 @@ function resetImageViewState() {
   imageViewMode.value = "fit";
   imageOcrResult.value = null;
   imageOcrError.value = null;
+  imageOcrIssue.value = null;
   isImageOcrPanelCollapsed.value = false;
   clearImageTextSelection();
   endImageDrag();
@@ -977,12 +976,14 @@ async function recognizeImageText() {
 
   isRecognizingImage.value = true;
   imageOcrError.value = null;
+  imageOcrIssue.value = null;
   isImageOcrPanelCollapsed.value = false;
   clearImageTextSelection();
   try {
     imageOcrResult.value = await ipasteApi.recognizeImageText(item.value.text);
   } catch (unknownError) {
-    imageOcrError.value = String(unknownError);
+    imageOcrIssue.value = getOcrModelIssue(unknownError);
+    imageOcrError.value = imageOcrIssue.value ? null : getOcrErrorMessage(unknownError);
   } finally {
     isRecognizingImage.value = false;
   }
@@ -1365,9 +1366,8 @@ function clamp(value: number, min: number, max: number) {
               <div class="viewer-image-ocr-heading">
                 <div class="min-w-0">
                   <h2>{{ t("viewer.ocrTitle") }}</h2>
-                  <p v-if="imageOcrResult">{{ imageOcrSummary }}</p>
-                  <p v-else-if="isRecognizingImage">{{ t("viewer.ocrRecognizing") }}</p>
-                  <p v-else>{{ t("viewer.ocrFailed") }}</p>
+                  <p v-if="isRecognizingImage">{{ t("viewer.ocrRecognizing") }}</p>
+                  <p v-else-if="!imageOcrResult && !imageOcrIssue">{{ t("viewer.ocrFailed") }}</p>
                 </div>
                 <button
                   v-if="imageOcrResult?.text"
@@ -1380,7 +1380,8 @@ function clamp(value: number, min: number, max: number) {
                 </button>
               </div>
 
-              <p v-if="imageOcrError" class="viewer-image-ocr-error">{{ imageOcrError }}</p>
+              <OcrSetupGuide v-if="imageOcrIssue" :issue="imageOcrIssue" />
+              <p v-else-if="imageOcrError" class="viewer-image-ocr-error">{{ imageOcrError }}</p>
               <p v-else-if="isRecognizingImage" class="viewer-image-ocr-loading">{{ imageOcrLoadingText }}</p>
               <textarea
                 v-else-if="imageOcrResult"

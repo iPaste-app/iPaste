@@ -24,16 +24,19 @@ const fallbackAppInfo: AppInfo = {
 };
 const fallbackOcrInstallStatus: OcrInstallStatus = {
   installed: false,
-  engineId: "tesseract",
+  needsRepair: false,
+  hasResources: false,
+  engineId: "paddleocr-onnx",
   engineVersion: null,
   mode: "fast",
   platform: "windows-x64",
-  manifestUrl: "https://github.com/iPaste-app/iPaste/releases/download/ipaste-ocr-windows-v1/ipaste-ocr-windows-x64-fast.json",
+  manifestUrl: "https://www.modelscope.cn/models/RapidAI/RapidOCR",
   installDir: "",
   downloadedBytes: 0,
-  totalBytes: 37_557_099,
+  totalBytes: 6_932_119,
   missingFiles: [],
 };
+const mockInstalledOcrModes = new Set<OcrMode>();
 let mockStarPromptState: StarPromptState = {
   status: "pending",
   successfulPasteCount: 0,
@@ -156,6 +159,9 @@ async function call<T>(command: string, args?: Record<string, unknown>, fallback
 }
 
 export const ipasteApi = {
+  settings() {
+    return call<AppSettings>("get_app_settings", undefined, mockSnapshot.settings);
+  },
   snapshot() {
     return call<AppSnapshot>("get_snapshot", undefined, mockSnapshot);
   },
@@ -499,35 +505,55 @@ export const ipasteApi = {
   appInfo() {
     return call<AppInfo>("get_app_info", undefined, fallbackAppInfo);
   },
-  ocrInstallStatus() {
-    return call<OcrInstallStatus>("get_ocr_install_status", undefined, fallbackOcrInstallStatus);
+  ocrInstallStatus(mode?: OcrMode) {
+    const fallbackMode = mode ?? fallbackOcrInstallStatus.mode;
+    const installed = mockInstalledOcrModes.has(fallbackMode);
+    const totalBytes = fallbackMode === "best" ? 31_824_456 : 6_932_119;
+    return call<OcrInstallStatus>("get_ocr_install_status", mode ? { mode } : undefined, {
+      ...fallbackOcrInstallStatus,
+      mode: fallbackMode,
+      installed,
+      hasResources: mockInstalledOcrModes.size > 0,
+      downloadedBytes: installed ? totalBytes : 0,
+      totalBytes,
+    });
   },
-  installOcrAssets() {
-    return call<OcrInstallStatus>("install_ocr_assets", undefined, {
+  async installOcrAssets(mode: OcrMode, activate = true) {
+    if (!isTauri) {
+      mockInstalledOcrModes.add(mode);
+      if (activate) mockSnapshot.settings.ocrMode = mode;
+    }
+    const totalBytes = mode === "best" ? 31_824_456 : 6_932_119;
+    return call<OcrInstallStatus>("install_ocr_assets", { mode, activate }, {
       ...fallbackOcrInstallStatus,
       installed: true,
-      engineVersion: "5.5.0.20241111-portable",
-      mode: fallbackOcrInstallStatus.mode,
-      downloadedBytes: 37_557_099,
-      totalBytes: 37_557_099,
+      hasResources: true,
+      engineVersion: "PP-OCRv6",
+      mode,
+      downloadedBytes: totalBytes,
+      totalBytes,
     });
   },
   removeOcrAssets() {
+    if (!isTauri) mockInstalledOcrModes.clear();
     return call<OcrInstallStatus>("remove_ocr_assets", undefined, fallbackOcrInstallStatus);
   },
   recognizeImageText(imagePath: string) {
     return call<ImageOcrResult>("recognize_image_text", { imagePath }, {
       text: "iPaste image OCR test Select text from image 2026",
       engine: "mock",
-      language: "chi_sim+eng",
+      language: "zh-Hans+en",
       words: [],
     });
   },
   showPanel() {
     return call<void>("show_panel");
   },
-  showSettings() {
-    return call<void>("show_settings");
+  showSettings(tab?: "ocr") {
+    return call<void>("show_settings", tab ? { tab } : undefined);
+  },
+  takeSettingsTarget() {
+    return call<"ocr" | null>("take_settings_target", undefined, null);
   },
   hidePanel() {
     return call<void>("hide_panel");

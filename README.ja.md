@@ -50,7 +50,7 @@ Linux はまだ公式ターゲットではありません。Tauri はクロス�
 4. 検索して項目を選択し、Enter を押してアクティブなアプリに貼り付けます。
 5. 長期的に再利用する内容はカテゴリに保存し、自分のワークフローに合わせて整理します。
 
-macOS での自動貼り付けにはアクセシビリティ権限が必要です。Windows で画像 OCR を使うには、Settings から Tesseract アセットをダウンロードする必要があります。
+macOS での自動貼り付けにはアクセシビリティ権限が必要です。Windows で画像 OCR を使うには、Settings から PP-OCRv6 Tiny または Small モデルをダウンロードする必要があります。
 
 ## Privacy And Data
 
@@ -70,7 +70,7 @@ iPaste は既定でローカルファーストです。
 | Platform | Status | Notes |
 | --- | --- | --- |
 | macOS | Supported | OCR はシステムの Vision framework を使用します。自動貼り付けにはアクセシビリティ権限が必要です。 |
-| Windows | Supported | OCR はダウンロード可能な Tesseract アセットを使用します。 |
+| Windows | Supported | OCR は内蔵 ONNX Runtime とダウンロード可能な PP-OCRv6 モデルを使用します。 |
 | Linux | Not supported yet | 現時点では公式リリースも完全な検証もありません。 |
 
 ## Tech Stack
@@ -157,7 +157,7 @@ iPaste から貼り付けると、アプリは選択したスニペットをシ�
 
 ### Image OCR
 
-macOS はシステムの Vision framework を使用します。Windows はアプリの環境設定からインストールできる Tesseract アセットを使用します。
+macOS はシステムの Vision framework を使用します。Windows は ONNX Runtime で PaddleOCR PP-OCRv6 をプロセス内実行し、環境設定から Tiny または Small モデルをインストールできます。
 
 ## Contributing
 

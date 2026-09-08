@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabledBySystem } from "@tauri-apps/plugin-autostart";
-import { openPath } from "@tauri-apps/plugin-opener";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   AlertCircle,
   AppWindow,
@@ -17,7 +15,6 @@ import {
   Database,
   Download,
   ExternalLink,
-  FolderOpen,
   Github,
   History,
   Keyboard,
@@ -36,8 +33,10 @@ import {
   Zap,
 } from "lucide-vue-next";
 import LanguageSelect from "./LanguageSelect.vue";
+import OcrSettingsPanel from "./OcrSettingsPanel.vue";
 import UpdateDialog from "./UpdateDialog.vue";
 import { useUpdater } from "../composables/useUpdater";
+import { useSettingsNavigation } from "../composables/useSettingsNavigation";
 import { languageOptions, t } from "../i18n";
 import { ipasteApi } from "../lib/ipasteApi";
 import { formatShortcut } from "../lib/format";
@@ -46,12 +45,15 @@ import {
   openGitHubRepository,
 } from "../lib/starPrompt";
 import { useIpasteStore } from "../stores/ipasteStore";
-import type { AppInfo, Language, OcrInstallProgress, OcrInstallStatus, OcrMode, PanelLayout, PanelOpenBehavior } from "../types";
+import type { AppInfo, Language, PanelLayout, PanelOpenBehavior } from "../types";
 
 const store = useIpasteStore();
 const DEFAULT_SHORTCUT = "CommandOrControl+Shift+V";
 type SettingsTab = "general" | "shortcuts" | "ocr" | "dataManagement" | "permissions" | "about";
 const activeTab = ref<SettingsTab>("general");
+const hasOpenedOcr = ref(false);
+const ocrNavigationRevision = ref(0);
+const settingsLoadError = ref<string | null>(null);
 const showPermissionGuide = ref(false);
 const shortcutDraft = ref(DEFAULT_SHORTCUT);
 const shortcutRecording = ref(false);
@@ -67,20 +69,23 @@ const isSavingCloud = ref(false);
 const appInfo = ref<AppInfo | null>(null);
 const isTauri = "__TAURI_INTERNALS__" in window;
 const isMacOs = /mac/i.test(navigator.platform) || /Mac OS/i.test(navigator.userAgent);
-const ocrStatus = ref<OcrInstallStatus | null>(null);
-const ocrProgress = ref<OcrInstallProgress | null>(null);
-const ocrMessage = ref<string | null>(null);
-const ocrError = ref<string | null>(null);
-const isInstallingOcr = ref(false);
-const isRemovingOcr = ref(false);
-const lastInstalledOcrMode = ref<OcrMode | null>(null);
-const autostartEnabled = ref(false);
+if (!isMacOs && new URLSearchParams(window.location.search).get("tab") === "ocr") {
+  activeTab.value = "ocr";
+  hasOpenedOcr.value = true;
+}
+const autostartEnabled = ref<boolean | null>(null);
 const isLoadingAutostart = ref(true);
 const isUpdatingAutostart = ref(false);
 const autostartError = ref<string | null>(null);
-let unlistenOcrProgress: UnlistenFn | null = null;
 let shouldRestoreAppShortcutAfterRecording = false;
 const updater = useUpdater();
+
+useSettingsNavigation(() => {
+  if (isMacOs) return;
+  activeTab.value = "ocr";
+  hasOpenedOcr.value = true;
+  ocrNavigationRevision.value++;
+}, (error) => { settingsLoadError.value = t("settings.loadError", { error: String(error) }); });
 
 const retentionOptions = computed(() => [
   { label: t("settings.retention.7"), value: 7 },
@@ -104,21 +109,6 @@ const panelOpenOptions = computed<Array<{ label: string; value: PanelOpenBehavio
 const panelLayoutOptions = computed<Array<{ label: string; value: PanelLayout }>>(() => [
   { label: t("settings.layout.top"), value: "top" },
   { label: t("settings.layout.side"), value: "side" },
-]);
-
-const ocrModeOptions = computed<Array<{ label: string; value: OcrMode; description: string; totalBytes: number }>>(() => [
-  {
-    label: "Fast",
-    value: "fast",
-    description: t("ocr.mode.fast.description"),
-    totalBytes: 37_557_099,
-  },
-  {
-    label: "Best",
-    value: "best",
-    description: t("ocr.mode.best.description"),
-    totalBytes: 59_452_879,
-  },
 ]);
 
 const tabs = computed(() => {
@@ -163,46 +153,6 @@ const appendCopyTimeoutText = computed(() => {
 const cloudStatusText = computed(() => {
   return store.cloud.enabled ? t("settings.cloud.enabled") : t("settings.cloud.disabled");
 });
-const selectedOcrModeOption = computed(() => {
-  return ocrModeOptions.value.find((option) => option.value === store.ocrMode) ?? ocrModeOptions.value[0];
-});
-const ocrStatusText = computed(() => {
-  if (!ocrStatus.value) return t("ocr.status.checking");
-  if (isMacOs) {
-    return t("ocr.status.macos");
-  }
-  if (ocrStatus.value.installed) {
-    return t("ocr.status.installed");
-  }
-  if (lastInstalledOcrMode.value && lastInstalledOcrMode.value !== store.ocrMode) {
-    return t("ocr.status.modeNotDownloaded");
-  }
-  return t("ocr.status.readyToDownload");
-});
-const ocrDownloadedText = computed(() => {
-  const downloaded = ocrProgress.value?.downloadedBytes ?? ocrStatus.value?.downloadedBytes ?? 0;
-  const total = ocrProgress.value?.totalBytes ?? ocrStatus.value?.totalBytes ?? selectedOcrModeOption.value.totalBytes;
-  return `${formatBytes(downloaded)} / ${formatBytes(total)}`;
-});
-const ocrInstallPercent = computed(() => {
-  const total = ocrProgress.value?.totalBytes ?? ocrStatus.value?.totalBytes ?? 0;
-  const downloaded = ocrProgress.value?.downloadedBytes ?? ocrStatus.value?.downloadedBytes ?? 0;
-  if (!total) return ocrStatus.value?.installed ? 100 : 0;
-  return Math.min(100, Math.round((downloaded / total) * 100));
-});
-const ocrInstallButtonText = computed(() => {
-  if (isInstallingOcr.value) {
-    return ocrProgress.value?.phase === "fetchingManifest" ? t("ocr.install.fetchingManifest") : t("ocr.install.downloading");
-  }
-  if (ocrStatus.value?.installed) {
-    return t("ocr.install.repair");
-  }
-  if (lastInstalledOcrMode.value && lastInstalledOcrMode.value !== store.ocrMode) {
-    return t("ocr.install.switchAndDownload");
-  }
-  return t("ocr.install.download");
-});
-
 const formattedShortcutDraft = computed(() => formatShortcut(shortcutDraft.value || store.shortcut));
 const canSaveShortcut = computed(() =>
   Boolean(shortcutDraft.value && shortcutDraft.value !== store.shortcut && !isSavingShortcut.value),
@@ -218,23 +168,29 @@ const fixedShortcuts = computed(() => [
   { keys: [`${formatShortcut("CommandOrControl+3")} ... ${formatShortcut("CommandOrControl+9")}`], action: t("settings.shortcuts.switchMoreCategories") },
 ]);
 
-onMounted(async () => {
-  await store.load();
-  appInfo.value = await ipasteApi.appInfo();
-  await loadOcrStatus();
-  await loadAutostartStatus();
-  if (isTauri) {
-    unlistenOcrProgress = await listen<OcrInstallProgress>("ipaste://ocr-install-progress", (event) => {
-      ocrProgress.value = event.payload;
-    });
-  }
-  resetShortcutForm();
-  resetCloudForm();
+watch(activeTab, (tab) => {
+  if (tab === "ocr") hasOpenedOcr.value = true;
 });
+
+onMounted(() => {
+  void loadPreferences();
+  void loadAutostartStatus();
+  void ipasteApi.appInfo().then((info) => { appInfo.value = info; }).catch(() => {});
+});
+
+async function loadPreferences() {
+  settingsLoadError.value = null;
+  try {
+    await store.loadSettings();
+    resetShortcutForm();
+    resetCloudForm();
+  } catch (error) {
+    settingsLoadError.value = t("settings.loadError", { error: String(error) });
+  }
+}
 
 onUnmounted(() => {
   void stopRecordingShortcut({ restoreAppShortcut: true });
-  void unlistenOcrProgress?.();
 });
 
 async function openAccessibilityGuide() {
@@ -259,7 +215,7 @@ async function loadAutostartStatus() {
 }
 
 async function toggleAutostart() {
-  if (isLoadingAutostart.value || isUpdatingAutostart.value) return;
+  if (autostartEnabled.value === null || isLoadingAutostart.value || isUpdatingAutostart.value) return;
 
   const nextEnabled = !autostartEnabled.value;
   isUpdatingAutostart.value = true;
@@ -485,84 +441,6 @@ async function updateLanguage(language: Language) {
   await store.updateLanguage(language);
 }
 
-async function loadOcrStatus() {
-  if (isMacOs) return;
-  try {
-    ocrStatus.value = await ipasteApi.ocrInstallStatus();
-    if (ocrStatus.value.installed) {
-      lastInstalledOcrMode.value = ocrStatus.value.mode;
-    }
-  } catch (unknownError) {
-    ocrError.value = String(unknownError);
-  }
-}
-
-async function updateOcrMode(mode: OcrMode) {
-  if (mode === store.ocrMode || isInstallingOcr.value || isRemovingOcr.value) return;
-  ocrMessage.value = null;
-  ocrError.value = null;
-  ocrProgress.value = null;
-  try {
-    await store.updateOcrMode(mode);
-    await loadOcrStatus();
-  } catch (unknownError) {
-    ocrError.value = String(unknownError);
-  }
-}
-
-async function installOcrAssets() {
-  ocrMessage.value = null;
-  ocrError.value = null;
-  isInstallingOcr.value = true;
-  try {
-    ocrProgress.value = {
-      phase: "fetchingManifest",
-      fileName: null,
-      downloadedBytes: 0,
-      totalBytes: ocrStatus.value?.totalBytes ?? 0,
-    };
-    ocrStatus.value = await ipasteApi.installOcrAssets();
-    lastInstalledOcrMode.value = ocrStatus.value.mode;
-    ocrMessage.value = t("ocr.readyMessage");
-  } catch (unknownError) {
-    ocrError.value = String(unknownError);
-  } finally {
-    isInstallingOcr.value = false;
-  }
-}
-
-async function removeOcrAssets() {
-  ocrMessage.value = null;
-  ocrError.value = null;
-  isRemovingOcr.value = true;
-  try {
-    ocrStatus.value = await ipasteApi.removeOcrAssets();
-    ocrProgress.value = null;
-    lastInstalledOcrMode.value = null;
-    ocrMessage.value = t("ocr.removedMessage");
-  } catch (unknownError) {
-    ocrError.value = String(unknownError);
-  } finally {
-    isRemovingOcr.value = false;
-  }
-}
-
-async function openOcrInstallDir() {
-  if (!ocrStatus.value?.installDir) return;
-  ocrMessage.value = null;
-  ocrError.value = null;
-  try {
-    await openPath(ocrStatus.value.installDir);
-  } catch (unknownError) {
-    ocrError.value = String(unknownError);
-  }
-}
-
-function formatBytes(bytes: number) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 MB";
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
 </script>
 
 <template>
@@ -585,6 +463,11 @@ function formatBytes(bytes: number) {
       </header>
 
       <div class="settings-content subtle-scrollbar">
+        <p v-if="settingsLoadError" class="settings-message settings-message-error" role="alert">
+          {{ settingsLoadError }}
+          <button type="button" class="permission-link" @click="loadPreferences">{{ t("settings.retry") }}</button>
+        </p>
+        <OcrSettingsPanel v-if="!isMacOs && hasOpenedOcr" v-show="activeTab === 'ocr'" :refresh-key="ocrNavigationRevision" />
         <div v-if="activeTab === 'general'" class="settings-section">
           <div class="settings-panel settings-general-panel">
             <section class="settings-general-item settings-language-panel">
@@ -621,6 +504,7 @@ function formatBytes(bytes: number) {
               </div>
 
               <button
+                v-if="autostartEnabled !== null"
                 type="button"
                 role="switch"
                 class="switch-control"
@@ -633,6 +517,11 @@ function formatBytes(bytes: number) {
               >
                 <span aria-hidden="true" />
               </button>
+              <div v-else class="autostart-pending" role="status">
+                <LoaderCircle v-if="isLoadingAutostart" class="size-4 update-spin" aria-hidden="true" />
+                <span v-if="isLoadingAutostart" class="sr-only">{{ t("settings.autostart.checking") }}</span>
+                <button v-else type="button" class="permission-link" @click="loadAutostartStatus">{{ t("settings.retry") }}</button>
+              </div>
             </section>
 
             <section class="settings-general-item">
@@ -831,102 +720,6 @@ function formatBytes(bytes: number) {
           </div>
         </div>
 
-        <div v-else-if="activeTab === 'ocr'" class="settings-section">
-          <section v-if="!isMacOs" class="settings-panel settings-column-panel">
-            <div class="settings-panel-heading">
-              <div class="settings-icon settings-icon-violet">
-                <ScanText class="size-5" />
-              </div>
-              <div class="min-w-0 flex-1">
-                <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.tabs.ocr") }}</h2>
-                <p class="mt-1 text-sm text-slate-500">{{ ocrStatusText }}</p>
-              </div>
-              <span class="ocr-status-badge" :class="{ 'ocr-status-badge-ready': ocrStatus?.installed }">
-                {{ ocrStatus?.installed ? t("common.ready") : t("common.notInstalled") }}
-              </span>
-            </div>
-
-            <div class="ocr-mode-options">
-              <button
-                v-for="option in ocrModeOptions"
-                :key="option.value"
-                type="button"
-                class="ocr-mode-option"
-                :class="{ 'ocr-mode-option-active': store.ocrMode === option.value }"
-                :aria-pressed="store.ocrMode === option.value"
-                :disabled="isInstallingOcr || isRemovingOcr"
-                @click="updateOcrMode(option.value)"
-              >
-                <span class="ocr-mode-option-header">
-                  <span>{{ option.label }}</span>
-                  <span>{{ formatBytes(option.totalBytes) }}</span>
-                </span>
-                <span class="ocr-mode-option-description">{{ option.description }}</span>
-              </button>
-            </div>
-            <p class="ocr-mode-hint">
-              {{ t("ocr.modeHint") }}
-            </p>
-
-            <div class="ocr-install-panel">
-              <div class="ocr-install-meter">
-                <div class="ocr-install-meter-fill" :style="{ width: `${ocrInstallPercent}%` }" />
-              </div>
-              <div class="ocr-install-meta">
-                <span>{{ ocrDownloadedText }}</span>
-                <span>{{ ocrInstallPercent }}%</span>
-              </div>
-            </div>
-
-            <div class="ocr-install-details">
-              <span>{{ t("ocr.downloadContents") }}</span>
-              <span>{{ t("ocr.currentSelection", { label: selectedOcrModeOption.label, description: selectedOcrModeOption.description }) }}</span>
-              <div v-if="ocrStatus?.installDir" class="ocr-install-dir-row">
-                <span>{{ t("ocr.directory", { path: ocrStatus.installDir }) }}</span>
-                <button
-                  type="button"
-                  class="settings-icon-button"
-                  :title="t('ocr.openDownloadDir')"
-                  :aria-label="t('ocr.openDownloadDir')"
-                  @click="openOcrInstallDir"
-                >
-                  <FolderOpen class="size-4" />
-                </button>
-              </div>
-              <span v-if="ocrStatus?.manifestUrl">{{ t("ocr.manifest", { url: ocrStatus.manifestUrl }) }}</span>
-              <span v-if="ocrProgress?.fileName">{{ t("ocr.currentFile", { file: ocrProgress.fileName }) }}</span>
-            </div>
-
-            <p v-if="ocrError || ocrMessage" class="settings-message" :class="{ 'settings-message-error': ocrError }">
-              <CheckCircle2 v-if="ocrMessage && !ocrError" class="size-4" />
-              <AlertCircle v-else class="size-4" />
-              <span>{{ ocrError || ocrMessage }}</span>
-            </p>
-
-            <div class="settings-action-row">
-              <button
-                type="button"
-                class="settings-action-button settings-action-button-primary"
-                :disabled="isInstallingOcr || isRemovingOcr"
-                @click="installOcrAssets"
-              >
-                <LoaderCircle v-if="isInstallingOcr" class="size-4 update-spin" />
-                <Download v-else class="size-4" />
-                <span>{{ ocrInstallButtonText }}</span>
-              </button>
-              <button
-                type="button"
-                class="settings-action-button settings-action-button-danger"
-                :disabled="isInstallingOcr || isRemovingOcr || !ocrStatus?.installed"
-                @click="removeOcrAssets"
-              >
-                <Unplug class="size-4" />
-                <span>{{ isRemovingOcr ? t("ocr.deleting") : t("ocr.deleteResources") }}</span>
-              </button>
-            </div>
-          </section>
-        </div>
-
         <div v-else-if="activeTab === 'dataManagement'" class="settings-section">
           <div class="data-management-grid">
             <section class="settings-panel settings-column-panel">
@@ -1014,7 +807,7 @@ function formatBytes(bytes: number) {
           </section>
         </div>
 
-        <div v-else class="settings-section">
+        <div v-else-if="activeTab === 'about'" class="settings-section">
           <section class="settings-panel settings-about-panel">
             <header class="about-identity">
               <div class="about-identity-icon">

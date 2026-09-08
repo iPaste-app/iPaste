@@ -1894,6 +1894,16 @@ body.ipaste-preserve-current-app .global-tooltip,
   overflow: visible;
 }
 
+.autostart-pending {
+  display: flex;
+  min-width: 2.75rem;
+  min-height: 1.5rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+}
+
 .settings-language-select {
   flex: 0 0 auto;
 }
@@ -2044,172 +2054,6 @@ body.ipaste-preserve-current-app .global-tooltip,
   line-height: 1.55;
 }
 
-.ocr-status-badge {
-  flex: 0 0 auto;
-  border: 1px solid #e2e8f0;
-  border-radius: 999px;
-  background: #f8fafc;
-  padding: 0.25rem 0.625rem;
-  color: #64748b;
-  font-size: 0.75rem;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.ocr-status-badge-ready {
-  border-color: #99f6e4;
-  background: #f0fdfa;
-  color: #0f766e;
-}
-
-.ocr-mode-options {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.625rem;
-}
-
-.ocr-mode-option {
-  display: flex;
-  min-width: 0;
-  min-height: 4.75rem;
-  flex-direction: column;
-  gap: 0.5rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 0.625rem;
-  background: #f8fafc;
-  padding: 0.75rem;
-  color: #475569;
-  text-align: left;
-  transition:
-    background-color 160ms ease,
-    border-color 160ms ease,
-    box-shadow 160ms ease,
-    color 160ms ease;
-}
-
-.ocr-mode-option:hover {
-  border-color: #cbd5e1;
-  background: #ffffff;
-  color: #334155;
-}
-
-.ocr-mode-option-active {
-  border-color: #0d9488;
-  background: #ecfdf5;
-  color: #0f766e;
-  box-shadow:
-    inset 0 0 0 1px rgba(13, 148, 136, 0.22),
-    0 6px 16px rgba(13, 148, 136, 0.08);
-}
-
-.ocr-mode-option:disabled {
-  cursor: not-allowed;
-  opacity: 0.64;
-}
-
-.ocr-mode-option-header {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  font-size: 0.8125rem;
-  font-weight: 750;
-  line-height: 1.2;
-}
-
-.ocr-mode-option-header span {
-  min-width: 0;
-}
-
-.ocr-mode-option-header span:first-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ocr-mode-option-header span:last-child {
-  flex: 0 0 auto;
-  color: #64748b;
-  font-size: 0.75rem;
-}
-
-.ocr-mode-option-active .ocr-mode-option-header span:last-child {
-  color: #0f766e;
-}
-
-.ocr-mode-option-description {
-  color: #64748b;
-  font-size: 0.75rem;
-  line-height: 1.45;
-}
-
-.ocr-mode-hint {
-  margin: -0.125rem 0 0;
-  color: #64748b;
-  font-size: 0.75rem;
-  line-height: 1.55;
-}
-
-.ocr-install-panel {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 0.375rem;
-}
-
-.ocr-install-meter {
-  position: relative;
-  height: 0.5rem;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #e2e8f0;
-}
-
-.ocr-install-meter-fill {
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #0f766e, #2563eb);
-  transition: width 180ms ease;
-}
-
-.ocr-install-meta {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-  color: #64748b;
-  font-size: 0.75rem;
-  font-weight: 650;
-}
-
-.ocr-install-details {
-  display: grid;
-  min-width: 0;
-  gap: 0.25rem;
-  color: #64748b;
-  font-size: 0.75rem;
-  line-height: 1.45;
-}
-
-.ocr-install-details span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.ocr-install-dir-row {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.ocr-install-dir-row > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .settings-icon-button {
   display: inline-grid;

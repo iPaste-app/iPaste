@@ -50,7 +50,7 @@ Linux 暂未作为正式目标平台。Tauri 具备跨平台能力，但当前�
 4. 搜索、选择条目，然后按回车粘贴回当前应用。
 5. 对长期复用的内容，保存到分类并按自己的工作流整理。
 
-macOS 上的自动粘贴需要辅助功能权限。Windows 上的图片 OCR 需要在设置中下载 Tesseract 资源。
+macOS 上的自动粘贴需要辅助功能权限。Windows 上的图片 OCR 需要在设置中下载 PP-OCRv6 Tiny 或 Small 模型。
 
 ## 隐私与数据
 
@@ -70,7 +70,7 @@ iPaste 的默认模型是本地优先。
 | 平台 | 状态 | 备注 |
 | --- | --- | --- |
 | macOS | 已支持 | OCR 使用系统 Vision 框架；自动粘贴需要辅助功能权限。 |
-| Windows | 已支持 | OCR 使用可下载的 Tesseract 资源。 |
+| Windows | 已支持 | OCR 使用内置 ONNX Runtime 和可下载的 PP-OCRv6 模型。 |
 | Linux | 暂未支持 | 当前没有正式发布和完整验证。 |
 
 ## 技术栈
@@ -157,7 +157,7 @@ Rust 后端在后台监听系统剪贴板，对受支持的内容进行规范化
 
 ### 图片 OCR
 
-macOS 使用系统 Vision 框架。Windows 使用可在应用偏好设置中安装的 Tesseract 资源。
+macOS 使用系统 Vision 框架。Windows 通过 ONNX Runtime 在进程内运行 PaddleOCR PP-OCRv6，可在应用偏好设置中安装 Tiny 或 Small 模型。
 
 ## 贡献
 

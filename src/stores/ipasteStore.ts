@@ -123,6 +123,10 @@ export const useIpasteStore = defineStore("ipaste", () => {
     }
   }
 
+  async function loadSettings() {
+    applySettings(await ipasteApi.settings());
+  }
+
   async function bindEvents() {
     if (!isTauri) return;
 
@@ -441,7 +445,6 @@ export const useIpasteStore = defineStore("ipaste", () => {
 
   async function updateOcrMode(mode: OcrMode) {
     const nextMode = cleanOcrMode(mode);
-    ocrMode.value = nextMode;
 
     try {
       const settings = await ipasteApi.updateOcrMode(nextMode);
@@ -758,6 +761,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
     visibleItems,
     selectedItem,
     load,
+    loadSettings,
     reloadClips,
     loadMoreClips,
     bindEvents,

@@ -93,6 +93,8 @@ export type StarPromptState = {
 
 export type OcrInstallStatus = {
   installed: boolean;
+  needsRepair: boolean;
+  hasResources: boolean;
   engineId: string;
   engineVersion?: string | null;
   mode: OcrMode;
@@ -105,10 +107,12 @@ export type OcrInstallStatus = {
 };
 
 export type OcrInstallProgress = {
-  phase: "fetchingManifest" | "downloading" | "completed" | string;
+  mode: OcrMode;
+  phase: "fetchingManifest" | "downloading" | "verifying" | "completed";
   fileName?: string | null;
   downloadedBytes: number;
   totalBytes: number;
+  networkBytes: number;
 };
 
 export type ImageOcrResult = {

@@ -50,7 +50,7 @@ Linux ist noch kein offizielles Ziel. Tauri ist plattformübergreifend, aber die
 4. Suche, wähle einen Eintrag aus und drücke Enter, um ihn zurück in die aktive App einzufügen.
 5. Speichere langfristig wiederverwendbare Inhalte in Kategorien und organisiere sie passend zu deinem Workflow.
 
-Automatisches Einfügen unter macOS erfordert die Bedienungshilfen-Berechtigung. Bild-OCR unter Windows erfordert das Herunterladen der Tesseract-Assets aus Settings.
+Automatisches Einfügen unter macOS erfordert die Bedienungshilfen-Berechtigung. Bild-OCR unter Windows erfordert ein PP-OCRv6-Tiny- oder Small-Modell aus Settings.
 
 ## Privacy And Data
 
@@ -70,7 +70,7 @@ Wenn dein Clipboard häufig Passwörter, Schlüssel, Kundendaten oder interne Un
 | Platform | Status | Notes |
 | --- | --- | --- |
 | macOS | Supported | OCR nutzt das systemeigene Vision framework; automatisches Einfügen erfordert die Bedienungshilfen-Berechtigung. |
-| Windows | Supported | OCR nutzt herunterladbare Tesseract-Assets. |
+| Windows | Supported | OCR nutzt die integrierte ONNX Runtime und herunterladbare PP-OCRv6-Modelle. |
 | Linux | Not supported yet | Derzeit gibt es kein offizielles Release und keine vollständige Validierung. |
 
 ## Tech Stack
@@ -157,7 +157,7 @@ Die Desktop-App kann sich über eine API-Adresse und einen API-Schlüssel in Pre
 
 ### Image OCR
 
-macOS nutzt das systemeigene Vision framework. Windows nutzt Tesseract-Assets, die über die App-Einstellungen installiert werden können.
+macOS nutzt das systemeigene Vision framework. Windows führt PaddleOCR PP-OCRv6 mit ONNX Runtime im Prozess aus; Tiny- und Small-Modelle können in den App-Einstellungen installiert werden.
 
 ## Contributing
 

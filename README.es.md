@@ -50,7 +50,7 @@ Linux aún no es un destino oficial. Tauri es multiplataforma, pero este reposit
 4. Busca, selecciona un elemento y pulsa Enter para pegarlo de nuevo en la aplicación activa.
 5. Guarda el contenido reutilizable a largo plazo en categorías y organízalo alrededor de tu flujo de trabajo.
 
-El pegado automático en macOS requiere permiso de Accesibilidad. El OCR de imágenes en Windows requiere descargar los recursos de Tesseract desde Settings.
+El pegado automático en macOS requiere permiso de Accesibilidad. El OCR de imágenes en Windows requiere descargar un modelo PP-OCRv6 Tiny o Small desde Settings.
 
 ## Privacy And Data
 
@@ -70,7 +70,7 @@ Si tu portapapeles suele contener contraseñas, claves, datos de clientes o cont
 | Platform | Status | Notes |
 | --- | --- | --- |
 | macOS | Supported | OCR usa el framework Vision del sistema; el pegado automático requiere permiso de Accesibilidad. |
-| Windows | Supported | OCR usa recursos descargables de Tesseract. |
+| Windows | Supported | OCR usa ONNX Runtime integrado y modelos PP-OCRv6 descargables. |
 | Linux | Not supported yet | Por el momento no hay versión oficial ni validación completa. |
 
 ## Tech Stack
@@ -157,7 +157,7 @@ La app de escritorio puede conectarse a una iPaste sync API autohospedada usando
 
 ### Image OCR
 
-macOS usa el framework Vision del sistema. Windows usa recursos de Tesseract que pueden instalarse desde las preferencias de la app.
+macOS usa el framework Vision del sistema. Windows ejecuta PaddleOCR PP-OCRv6 dentro del proceso con ONNX Runtime; los modelos Tiny y Small se instalan desde las preferencias.
 
 ## Contributing
 

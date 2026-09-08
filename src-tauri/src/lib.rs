@@ -1,16 +1,24 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    process::Command,
     sync::{Arc, Mutex},
     thread,
     time::Duration,
 };
 
+#[cfg(target_os = "windows")]
+mod windows_ocr;
+#[cfg(target_os = "windows")]
+mod ocr_asset_cache;
+mod ocr_error;
+use ocr_error::ImageOcrError;
+
 #[cfg(target_os = "macos")]
 use std::ffi::c_int;
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 use std::io::{Read, Write};
+#[cfg(target_os = "macos")]
+use std::process::Command;
 #[cfg(target_os = "macos")]
 use std::time::Instant;
 
@@ -61,8 +69,6 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use uuid::Uuid;
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
-#[cfg(not(target_os = "macos"))]
-use zip::ZipArchive;
 
 #[cfg(target_os = "macos")]
 define_class!(
@@ -93,24 +99,11 @@ const PAUSE_CAPTURE_LABEL: &str = "暂停捕捉";
 const RESUME_CAPTURE_LABEL: &str = "恢复捕捉";
 const ENABLE_APPEND_COPY_LABEL: &str = "开启追加复制";
 const DISABLE_APPEND_COPY_LABEL: &str = "关闭追加复制";
-#[cfg(not(target_os = "macos"))]
-const OCR_GITHUB_RELEASE_BASE_URL: &str =
-    "https://github.com/iPaste-app/iPaste/releases/download/ipaste-ocr-windows-v1/";
-#[cfg(not(target_os = "macos"))]
-const OCR_R2_BASE_URL: &str = env!("IPASTE_OCR_R2_BASE_URL");
-#[cfg(not(target_os = "macos"))]
-const UPDATER_R2_ENDPOINT: &str = env!("IPASTE_UPDATER_R2_ENDPOINT");
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 const OCR_DIR: &str = "ocr";
-#[cfg(not(target_os = "macos"))]
-const OCR_ASSET_DIR: &str = "assets";
-#[cfg(not(target_os = "macos"))]
-const OCR_ENGINE_DIR: &str = "tesseract";
+#[cfg(target_os = "windows")]
+const OCR_MODEL_DIR: &str = "models";
 const DEFAULT_OCR_MODE: &str = "fast";
-#[cfg(not(target_os = "macos"))]
-const OCR_FAST_TOTAL_BYTES: u64 = 37_557_099;
-#[cfg(not(target_os = "macos"))]
-const OCR_BEST_TOTAL_BYTES: u64 = 59_452_879;
 #[cfg(target_os = "macos")]
 const MACOS_OCR_ENGINE_ID: &str = "apple-vision";
 #[cfg(target_os = "macos")]
@@ -524,6 +517,8 @@ struct CloudSettings {
 #[serde(rename_all = "camelCase")]
 struct OcrInstallStatus {
     installed: bool,
+    needs_repair: bool,
+    has_resources: bool,
     engine_id: String,
     engine_version: Option<String>,
     mode: String,
@@ -538,10 +533,12 @@ struct OcrInstallStatus {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OcrInstallProgress {
+    mode: String,
     phase: String,
     file_name: Option<String>,
     downloaded_bytes: u64,
     total_bytes: u64,
+    network_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -594,12 +591,6 @@ struct OcrManifestFile {
     path: String,
     size: u64,
     sha256: String,
-    #[serde(default)]
-    archive: Option<String>,
-    #[serde(default)]
-    install_dir: Option<String>,
-    #[serde(default)]
-    entries: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -708,6 +699,13 @@ struct MainPanelState {
 
 struct AppState {
     store: Store,
+    settings_target: Mutex<Option<String>>,
+    #[cfg(target_os = "windows")]
+    ocr_service: Arc<windows_ocr::OcrService>,
+    #[cfg(target_os = "windows")]
+    ocr_asset_lock: Arc<Mutex<()>>,
+    #[cfg(target_os = "windows")]
+    ocr_validation_cache: ocr_asset_cache::ValidationCache,
     is_listening: Arc<Mutex<bool>>,
     show_menu_item: MenuItem<tauri::Wry>,
     append_copy_menu_item: MenuItem<tauri::Wry>,
@@ -2301,6 +2299,14 @@ impl Store {
 }
 
 #[tauri::command]
+async fn get_app_settings(state: tauri::State<'_, AppState>) -> Result<AppSettings, String> {
+    let store = state.store.clone();
+    tokio::task::spawn_blocking(move || store.settings())
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 fn get_snapshot(state: tauri::State<'_, AppState>) -> Result<AppSnapshot, String> {
     state.store.prune_expired()?;
     let (clip_page, categories, category_items) = state.store.snapshot()?;
@@ -2602,14 +2608,29 @@ fn update_panel_layout(
 }
 
 #[tauri::command]
-fn update_ocr_mode(
+async fn update_ocr_mode(
     app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
     mode: String,
 ) -> Result<AppSettings, String> {
-    let settings = state.store.update_ocr_mode(mode)?;
-    emit_settings_changed(&app, &settings);
-    Ok(settings)
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        #[cfg(target_os = "windows")]
+        let _guard = state
+            .ocr_asset_lock
+            .try_lock()
+            .map_err(|_| "OCR 模型正在处理中，请稍后重试".to_string())?;
+        #[cfg(target_os = "windows")]
+        if !ocr_install_status(&app, &mode)?.installed {
+            return Err("请先下载完整的 OCR 模型".to_string());
+        }
+        let settings = state.store.update_ocr_mode(mode)?;
+        #[cfg(target_os = "windows")]
+        state.ocr_service.invalidate()?;
+        emit_settings_changed(&app, &settings);
+        Ok(settings)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -2665,82 +2686,142 @@ fn get_app_info(app: tauri::AppHandle) -> AppInfo {
 }
 
 #[tauri::command]
-fn get_ocr_install_status(
+async fn get_ocr_install_status(
     _app: tauri::AppHandle,
-    _state: tauri::State<'_, AppState>,
+    mode: Option<String>,
 ) -> Result<OcrInstallStatus, String> {
     #[cfg(target_os = "macos")]
     {
+        let _ = mode;
         return macos_ocr_install_status();
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     {
-        let mode = _state.store.settings()?.ocr_mode;
-        ocr_install_status(&_app, &mode)
+        tokio::task::spawn_blocking(move || {
+            let mode = match mode {
+                Some(mode) => clean_ocr_mode(mode)?,
+                None => _app.state::<AppState>().store.settings()?.ocr_mode,
+            };
+            ocr_install_status(&_app, &mode)
+        })
+        .await
+        .map_err(|error| error.to_string())?
     }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    Err("当前平台暂不支持图片 OCR".to_string())
 }
 
 #[tauri::command]
 async fn install_ocr_assets(
     _app: tauri::AppHandle,
     _state: tauri::State<'_, AppState>,
+    mode: Option<String>,
+    activate: Option<bool>,
 ) -> Result<OcrInstallStatus, String> {
     #[cfg(target_os = "macos")]
     {
-        emit_ocr_install_progress(&_app, "completed", None, 0, 0);
+        let _ = (mode, activate);
+        emit_ocr_install_progress(&_app, "fast", "completed", None, 0, 0, 0);
         return macos_ocr_install_status();
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     {
         let app_for_task = _app.clone();
-        let mode = _state.store.settings()?.ocr_mode;
-        tokio::task::spawn_blocking(move || install_ocr_assets_inner(&app_for_task, &mode))
-            .await
-            .map_err(|error| error.to_string())?
+        let mode = clean_ocr_mode(mode.unwrap_or(_state.store.settings()?.ocr_mode))?;
+        let asset_lock = _state.ocr_asset_lock.clone();
+        let ocr_service = _state.ocr_service.clone();
+        let store = _state.store.clone();
+        tokio::task::spawn_blocking(move || {
+            let _guard = asset_lock
+                .try_lock()
+                .map_err(|_| "OCR 模型正在处理中，请稍后重试".to_string())?;
+            if !activate.unwrap_or(false) {
+                app_for_task
+                    .state::<AppState>()
+                    .ocr_validation_cache
+                    .clear()?;
+            }
+            let status = install_ocr_assets_inner(&app_for_task, &mode)?;
+            if !status.installed {
+                return Err("OCR 模型校验未通过，请重试".to_string());
+            }
+            if activate.unwrap_or(false) {
+                ocr_service.invalidate()?;
+                let settings = store.update_ocr_mode(mode)?;
+                emit_settings_changed(&app_for_task, &settings);
+            }
+            Ok(status)
+        })
+        .await
+        .map_err(|error| error.to_string())?
     }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    Err("当前平台暂不支持图片 OCR".to_string())
 }
 
 #[tauri::command]
-fn remove_ocr_assets(
-    _app: tauri::AppHandle,
-    _state: tauri::State<'_, AppState>,
-) -> Result<OcrInstallStatus, String> {
+async fn remove_ocr_assets(_app: tauri::AppHandle) -> Result<OcrInstallStatus, String> {
     #[cfg(target_os = "macos")]
     {
         return macos_ocr_install_status();
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     {
-        let mode = _state.store.settings()?.ocr_mode;
-        let root = ocr_root_dir(&_app)?;
-        if root.exists() {
-            fs::remove_dir_all(&root).map_err(|error| error.to_string())?;
-        }
-        ocr_install_status(&_app, &mode)
+        tokio::task::spawn_blocking(move || {
+            let state = _app.state::<AppState>();
+            let _guard = state
+                .ocr_asset_lock
+                .try_lock()
+                .map_err(|_| "OCR 模型正在处理中，请稍后重试".to_string())?;
+            let mode = state.store.settings()?.ocr_mode;
+            state.ocr_service.invalidate()?;
+            state.ocr_validation_cache.clear()?;
+            let root = ocr_root_dir(&_app)?;
+            if root.exists() {
+                fs::remove_dir_all(&root).map_err(|error| error.to_string())?;
+            }
+            ocr_install_status(&_app, &mode)
+        })
+        .await
+        .map_err(|error| error.to_string())?
     }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    Err("当前平台暂不支持图片 OCR".to_string())
 }
 
 #[tauri::command]
 async fn recognize_image_text(
     _app: tauri::AppHandle,
+    _state: tauri::State<'_, AppState>,
     image_path: String,
-) -> Result<ImageOcrResult, String> {
+) -> Result<ImageOcrResult, ImageOcrError> {
     #[cfg(target_os = "macos")]
     {
         return tokio::task::spawn_blocking(move || recognize_image_text_macos(image_path))
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| error.to_string())?
+            .map_err(ImageOcrError::from);
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     {
-        tokio::task::spawn_blocking(move || recognize_image_text_inner(&_app, image_path))
-            .await
-            .map_err(|error| error.to_string())?
+        let mode = _state.store.settings()?.ocr_mode;
+        let ocr_service = _state.ocr_service.clone();
+        tokio::task::spawn_blocking(move || {
+            recognize_image_text_inner(&_app, &ocr_service, &mode, image_path)
+        })
+        .await
+        .map_err(|error| error.to_string())?
     }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    Err("当前平台暂不支持图片 OCR".to_string().into())
 }
 
 #[tauri::command]
@@ -2785,8 +2866,20 @@ fn show_panel(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn show_settings(app: tauri::AppHandle) -> Result<(), String> {
-    show_settings_window(&app)
+async fn show_settings(app: tauri::AppHandle, tab: Option<String>) -> Result<(), String> {
+    if tab.as_deref().is_some_and(|tab| tab != "ocr") {
+        return Err("不支持的设置页面".to_string());
+    }
+    show_settings_window(&app, tab.as_deref())
+}
+
+#[tauri::command]
+fn take_settings_target(state: tauri::State<'_, AppState>) -> Result<Option<String>, String> {
+    Ok(state
+        .settings_target
+        .lock()
+        .map_err(|error| error.to_string())?
+        .take())
 }
 
 #[tauri::command]
@@ -3005,6 +3098,7 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
+            get_app_settings,
             list_clips,
             list_categories,
             list_category_items,
@@ -3046,6 +3140,7 @@ pub fn run() {
             sync_cloud_in_background,
             show_panel,
             show_settings,
+            take_settings_target,
             open_clip_viewer,
             close_clip_viewer,
             hide_panel,
@@ -3099,6 +3194,18 @@ pub fn run() {
             )?;
             let state = AppState {
                 store: store.clone(),
+                settings_target: Mutex::new(None),
+                #[cfg(target_os = "windows")]
+                ocr_asset_lock: Arc::new(Mutex::new(())),
+                #[cfg(target_os = "windows")]
+                ocr_validation_cache: ocr_asset_cache::ValidationCache::default(),
+                #[cfg(target_os = "windows")]
+                ocr_service: Arc::new(windows_ocr::OcrService::new(
+                    app.path()
+                        .resource_dir()
+                        .map_err(|error| error.to_string())?
+                        .join("onnxruntime.dll"),
+                )),
                 is_listening: Arc::new(Mutex::new(true)),
                 show_menu_item: show_menu_item.clone(),
                 append_copy_menu_item: append_copy_menu_item.clone(),
@@ -3142,6 +3249,15 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            #[cfg(target_os = "windows")]
+            if window.label() == SETTINGS_WINDOW {
+                if let WindowEvent::Focused(focused) = event {
+                    // Elevate only while focused; do not change the viewer's pin preference.
+                    let _ = window.set_always_on_top(
+                        *focused && settings_has_pinned_viewer(window.app_handle()),
+                    );
+                }
+            }
             if window.label() == MAIN_WINDOW {
                 if let WindowEvent::Focused(false) = event {
                     if current_main_window_activation(window.app_handle())
@@ -3181,7 +3297,7 @@ pub fn run() {
             "settings" => {
                 let app = app.clone();
                 thread::spawn(move || {
-                    let _ = show_settings_window(&app);
+                    let _ = show_settings_window(&app, None);
                 });
             }
             "append-copy" => {
@@ -4271,7 +4387,22 @@ fn current_app_bundle_id(app: &tauri::AppHandle) -> Option<String> {
         .or_else(|| Some(app.config().identifier.clone()))
 }
 
-fn show_settings_window(app: &tauri::AppHandle) -> Result<(), String> {
+#[cfg(target_os = "windows")]
+fn settings_has_pinned_viewer(app: &tauri::AppHandle) -> bool {
+    app.webview_windows().values().any(|window| {
+        window.label().starts_with(CLIP_VIEWER_WINDOW_PREFIX)
+            && window.is_visible().unwrap_or(false)
+            && window.is_always_on_top().unwrap_or(false)
+    })
+}
+
+fn show_settings_window(app: &tauri::AppHandle, tab: Option<&str>) -> Result<(), String> {
+    if let Some(tab) = tab {
+        *app.state::<AppState>()
+            .settings_target
+            .lock()
+            .map_err(|error| error.to_string())? = Some(tab.to_string());
+    }
     let language = app
         .try_state::<AppState>()
         .and_then(|state| state.store.settings().ok())
@@ -4288,7 +4419,10 @@ fn show_settings_window(app: &tauri::AppHandle) -> Result<(), String> {
         WebviewWindowBuilder::new(
             app,
             SETTINGS_WINDOW,
-            WebviewUrl::App("index.html?window=settings".into()),
+            WebviewUrl::App(match tab {
+                Some("ocr") => "index.html?window=settings&tab=ocr".into(),
+                _ => "index.html?window=settings".into(),
+            }),
         )
         .title(localized_text(&language, "settings_title"))
         .inner_size(
@@ -4310,11 +4444,19 @@ fn show_settings_window(app: &tauri::AppHandle) -> Result<(), String> {
     } else {
         window.center().map_err(|error| error.to_string())?;
     }
+    #[cfg(target_os = "windows")]
+    window
+        .set_always_on_top(settings_has_pinned_viewer(app))
+        .map_err(|error| error.to_string())?;
     window.show().map_err(|error| error.to_string())?;
     if let Some(monitor) = &main_monitor {
         position_window_centered_on_monitor(&window, &monitor, SETTINGS_WINDOW_GEOMETRY)?;
     }
     window.set_focus().map_err(|error| error.to_string())?;
+    if tab.is_some() {
+        // The pending target also covers an existing window whose listener is still starting.
+        let _ = window.emit("ipaste://settings-navigation", ());
+    }
     Ok(())
 }
 
@@ -5474,25 +5616,34 @@ fn cloud_status_message(status: StatusCode) -> String {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 fn install_ocr_assets_inner(
     app: &tauri::AppHandle,
     mode: &str,
 ) -> Result<OcrInstallStatus, String> {
     let mode = clean_ocr_mode(mode.to_string())?;
-    emit_ocr_install_progress(app, "fetchingManifest", None, 0, 0);
-    let manifest = fetch_ocr_manifest(&mode)?;
+    emit_ocr_install_progress(app, &mode, "fetchingManifest", None, 0, 0, 0);
+    let manifest = paddle_ocr_manifest(&mode)?;
 
-    let asset_dir = ocr_asset_dir(app)?;
-    let download_dir = ocr_download_dir(app)?;
-    fs::create_dir_all(&asset_dir).map_err(|error| error.to_string())?;
-    fs::create_dir_all(&download_dir).map_err(|error| error.to_string())?;
+    let model_dir = ocr_model_dir(app)?;
+    fs::create_dir_all(&model_dir).map_err(|error| error.to_string())?;
     let total_bytes = manifest_total_bytes(&manifest);
     let mut downloaded_bytes = 0_u64;
+    let mut network_bytes = 0_u64;
+    let mut last_progress = std::time::Instant::now();
 
-    emit_ocr_install_progress(app, "downloading", None, downloaded_bytes, total_bytes);
+    emit_ocr_install_progress(
+        app,
+        &mode,
+        "downloading",
+        None,
+        downloaded_bytes,
+        total_bytes,
+        network_bytes,
+    );
 
     let client = Client::builder()
+        .user_agent(concat!("iPaste/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(120))
         .build()
         .map_err(|error| error.to_string())?;
@@ -5502,20 +5653,31 @@ fn install_ocr_assets_inner(
             downloaded_bytes = downloaded_bytes.saturating_add(file.size);
             emit_ocr_install_progress(
                 app,
+                &mode,
                 "downloading",
                 Some(file.name.clone()),
                 downloaded_bytes.min(total_bytes),
                 total_bytes,
+                network_bytes,
             );
             continue;
         }
 
         let url = format!("{}{}", manifest.engine.base_url, file.path);
-        let target_path = ocr_download_target_path(app, file)?;
+        let target_path = ocr_manifest_file_path(app, file)?;
         if let Some(parent) = target_path.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
         let temp_path = target_path.with_extension("download");
+        emit_ocr_install_progress(
+            app,
+            &mode,
+            "downloading",
+            Some(file.name.clone()),
+            downloaded_bytes,
+            total_bytes,
+            network_bytes,
+        );
         let mut response = client.get(url).send().map_err(|error| error.to_string())?;
 
         if !response.status().is_success() {
@@ -5543,84 +5705,89 @@ fn install_ocr_assets_inner(
                 .write_all(&buffer[..read])
                 .map_err(|error| error.to_string())?;
             file_bytes = file_bytes.saturating_add(read as u64);
-            emit_ocr_install_progress(
-                app,
-                "downloading",
-                Some(file.name.clone()),
-                file_start_bytes.saturating_add(file_bytes).min(total_bytes),
-                total_bytes,
-            );
+            network_bytes = network_bytes.saturating_add(read as u64);
+            if last_progress.elapsed() >= Duration::from_millis(100) {
+                emit_ocr_install_progress(
+                    app,
+                    &mode,
+                    "downloading",
+                    Some(file.name.clone()),
+                    file_start_bytes.saturating_add(file_bytes).min(total_bytes),
+                    total_bytes,
+                    network_bytes,
+                );
+                last_progress = std::time::Instant::now();
+            }
         }
 
         output.flush().map_err(|error| error.to_string())?;
+        drop(output);
+        emit_ocr_install_progress(
+            app,
+            &mode,
+            "verifying",
+            Some(file.name.clone()),
+            file_start_bytes.saturating_add(file_bytes).min(total_bytes),
+            total_bytes,
+            network_bytes,
+        );
         let hash = file_sha256(&temp_path)?;
         if !hash.eq_ignore_ascii_case(&file.sha256) {
             let _ = fs::remove_file(&temp_path);
             return Err(format!("{} 校验失败", file.name));
         }
 
-        fs::rename(&temp_path, &target_path).map_err(|error| error.to_string())?;
-        if file.archive.as_deref() == Some("zip") {
-            install_ocr_zip_archive(app, file, &target_path)?;
-            let _ = fs::remove_file(&target_path);
+        if target_path.exists() {
+            fs::remove_file(&target_path).map_err(|error| error.to_string())?;
         }
+        fs::rename(&temp_path, &target_path).map_err(|error| error.to_string())?;
         downloaded_bytes = file_start_bytes.saturating_add(file.size);
     }
 
-    write_ocr_manifest_cache(app, &mode, &manifest)?;
     let status = ocr_install_status_for_manifest(app, &manifest, &mode)?;
+    remove_legacy_tesseract_assets(app)?;
     emit_ocr_install_progress(
         app,
+        &mode,
         "completed",
         None,
         status.downloaded_bytes,
         status.total_bytes,
+        network_bytes,
     );
     Ok(status)
 }
 
-#[cfg(not(target_os = "macos"))]
-fn fetch_ocr_manifest(mode: &str) -> Result<OcrManifest, String> {
-    let client = Client::builder()
-        .timeout(Duration::from_secs(8))
-        .build()
-        .map_err(|error| error.to_string())?;
-    let mut errors = Vec::new();
-
-    for manifest_url in ocr_manifest_urls(mode) {
-        match fetch_ocr_manifest_from_url(&client, &manifest_url, mode) {
-            Ok(manifest) => return Ok(manifest),
-            Err(error) => errors.push(format!("{manifest_url}：{error}")),
-        }
-    }
-
-    Err(format!("无法获取 OCR 资源信息：{}", errors.join("；")))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn fetch_ocr_manifest_from_url(
-    client: &Client,
-    manifest_url: &str,
-    mode: &str,
-) -> Result<OcrManifest, String> {
-    let response = client
-        .get(manifest_url)
-        .send()
-        .map_err(|error| error.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!("HTTP {}", response.status().as_u16()));
-    }
-
-    let manifest = response
-        .json::<OcrManifest>()
-        .map_err(|error| format!("无法解析 OCR manifest：{error}"))?;
-    validate_ocr_manifest(&manifest, mode)?;
+#[cfg(target_os = "windows")]
+fn paddle_ocr_manifest(mode: &str) -> Result<OcrManifest, String> {
+    let mode = clean_ocr_mode(mode.to_string())?;
+    let files = windows_ocr::assets_for_mode(&mode)?
+        .into_iter()
+        .map(|asset| OcrManifestFile {
+            role: asset.role.to_string(),
+            name: asset.name.to_string(),
+            path: asset.path.to_string(),
+            size: asset.size,
+            sha256: asset.sha256.to_string(),
+        })
+        .collect();
+    let manifest = OcrManifest {
+        engine: OcrManifestEngine {
+            id: windows_ocr::ENGINE_ID.to_string(),
+            version: windows_ocr::ENGINE_VERSION.to_string(),
+            platform: ocr_platform().to_string(),
+            mode: Some(mode.clone()),
+            base_url: windows_ocr::MODEL_BASE_URL.to_string(),
+            files,
+        },
+    };
+    validate_ocr_manifest(&manifest, &mode)?;
     Ok(manifest)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 fn validate_ocr_manifest(manifest: &OcrManifest, mode: &str) -> Result<(), String> {
-    if manifest.engine.id != "tesseract" {
+    if manifest.engine.id != windows_ocr::ENGINE_ID {
         return Err("OCR manifest 引擎不受支持".to_string());
     }
     if manifest.engine.mode.as_deref().unwrap_or(mode) != mode {
@@ -5645,51 +5812,29 @@ fn validate_ocr_manifest(manifest: &OcrManifest, mode: &str) -> Result<(), Strin
         if file.path.contains("..") {
             return Err(format!("OCR 文件路径不安全：{}", file.path));
         }
-        if file.role == "engine" && file.archive.as_deref() != Some("zip") {
-            return Err("OCR 引擎需要使用 portable zip 包".to_string());
-        }
-        if let Some(archive) = &file.archive {
-            if archive != "zip" {
-                return Err(format!("OCR archive 类型不受支持：{archive}"));
-            }
-        }
-        if let Some(install_dir) = &file.install_dir {
-            validate_relative_path(install_dir)?;
-        }
-        for entry in &file.entries {
-            validate_relative_path(entry)?;
+        if !matches!(
+            file.role.as_str(),
+            "detection" | "classification" | "recognition" | "dictionary"
+        ) {
+            return Err(format!("OCR 文件角色不受支持：{}", file.role));
         }
     }
     Ok(())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 fn ocr_install_status(app: &tauri::AppHandle, mode: &str) -> Result<OcrInstallStatus, String> {
     let mode = clean_ocr_mode(mode.to_string())?;
-    match read_ocr_manifest_cache(app, &mode)? {
-        Some(manifest) => ocr_install_status_for_manifest(app, &manifest, &mode),
-        None => {
-            let install_dir = ocr_root_dir(app)?;
-            Ok(OcrInstallStatus {
-                installed: false,
-                engine_id: "tesseract".to_string(),
-                engine_version: None,
-                mode: mode.clone(),
-                platform: ocr_platform().to_string(),
-                manifest_url: ocr_primary_manifest_url(&mode),
-                install_dir: install_dir.to_string_lossy().to_string(),
-                downloaded_bytes: 0,
-                total_bytes: ocr_default_total_bytes(&mode),
-                missing_files: Vec::new(),
-            })
-        }
-    }
+    let manifest = paddle_ocr_manifest(&mode)?;
+    ocr_install_status_for_manifest(app, &manifest, &mode)
 }
 
 #[cfg(target_os = "macos")]
 fn macos_ocr_install_status() -> Result<OcrInstallStatus, String> {
     Ok(OcrInstallStatus {
         installed: true,
+        needs_repair: false,
+        has_resources: false,
         engine_id: MACOS_OCR_ENGINE_ID.to_string(),
         engine_version: Some("system".to_string()),
         mode: DEFAULT_OCR_MODE.to_string(),
@@ -5702,18 +5847,28 @@ fn macos_ocr_install_status() -> Result<OcrInstallStatus, String> {
     })
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 fn ocr_install_status_for_manifest(
     app: &tauri::AppHandle,
     manifest: &OcrManifest,
     mode: &str,
 ) -> Result<OcrInstallStatus, String> {
     let mode = clean_ocr_mode(mode.to_string())?;
-    let install_dir = ocr_root_dir(app)?;
+    let install_dir = ocr_model_dir(app)?;
+    let has_resources = install_dir
+        .read_dir()
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false);
     let mut downloaded_bytes = 0_u64;
     let mut missing_files = Vec::new();
+    let mut has_model_resources = false;
 
     for file in &manifest.engine.files {
+        // The classifier is shared; its presence does not mean this model was downloaded.
+        if file.role != "classification" {
+            let path = install_dir.join(&file.name);
+            has_model_resources |= path.is_file() || path.with_extension("download").is_file();
+        }
         if ocr_manifest_file_installed(app, file)? {
             downloaded_bytes = downloaded_bytes.saturating_add(file.size);
         } else {
@@ -5724,11 +5879,13 @@ fn ocr_install_status_for_manifest(
     let total_bytes = manifest_total_bytes(manifest);
     Ok(OcrInstallStatus {
         installed: missing_files.is_empty() && !manifest.engine.files.is_empty(),
+        needs_repair: has_model_resources && !missing_files.is_empty(),
+        has_resources,
         engine_id: manifest.engine.id.clone(),
         engine_version: Some(manifest.engine.version.clone()),
         mode: mode.clone(),
         platform: manifest.engine.platform.clone(),
-        manifest_url: ocr_primary_manifest_url(&mode),
+        manifest_url: windows_ocr::MODEL_SOURCE_URL.to_string(),
         install_dir: install_dir.to_string_lossy().to_string(),
         downloaded_bytes,
         total_bytes,
@@ -5736,276 +5893,32 @@ fn ocr_install_status_for_manifest(
     })
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 fn manifest_total_bytes(manifest: &OcrManifest) -> u64 {
     manifest.engine.files.iter().map(|file| file.size).sum()
 }
 
-#[cfg(not(target_os = "macos"))]
-fn ocr_default_total_bytes(mode: &str) -> u64 {
-    match mode {
-        "best" => OCR_BEST_TOTAL_BYTES,
-        _ => OCR_FAST_TOTAL_BYTES,
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn ocr_manifest_urls(mode: &str) -> Vec<String> {
-    let mut urls = Vec::new();
-    for base_url in ocr_r2_base_urls() {
-        push_unique_url(&mut urls, ocr_manifest_url_for_base(&base_url, mode));
-    }
-    push_unique_url(
-        &mut urls,
-        ocr_manifest_url_for_base(OCR_GITHUB_RELEASE_BASE_URL, mode),
-    );
-    urls
-}
-
-#[cfg(not(target_os = "macos"))]
-fn ocr_primary_manifest_url(mode: &str) -> String {
-    ocr_manifest_urls(mode)
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| ocr_manifest_url_for_base(OCR_GITHUB_RELEASE_BASE_URL, mode))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn ocr_manifest_url_for_base(base_url: &str, mode: &str) -> String {
-    format!("{base_url}ipaste-ocr-windows-x64-{mode}.json")
-}
-
-#[cfg(not(target_os = "macos"))]
-fn ocr_r2_base_urls() -> Vec<String> {
-    let mut base_urls = Vec::new();
-
-    if let Ok(base_url) = std::env::var("IPASTE_OCR_R2_BASE_URL") {
-        push_optional_base_url(&mut base_urls, normalize_ocr_base_url(&base_url));
-    }
-    push_optional_base_url(&mut base_urls, normalize_ocr_base_url(OCR_R2_BASE_URL));
-
-    if let Ok(endpoint) = std::env::var("IPASTE_UPDATER_R2_ENDPOINT") {
-        push_optional_base_url(&mut base_urls, derive_ocr_r2_base_url(&endpoint));
-    }
-    push_optional_base_url(&mut base_urls, derive_ocr_r2_base_url(UPDATER_R2_ENDPOINT));
-
-    base_urls
-}
-
-#[cfg(not(target_os = "macos"))]
-fn push_optional_base_url(base_urls: &mut Vec<String>, base_url: Option<String>) {
-    if let Some(base_url) = base_url {
-        push_unique_url(base_urls, base_url);
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn push_unique_url(urls: &mut Vec<String>, url: String) {
-    if !urls.iter().any(|existing| existing == &url) {
-        urls.push(url);
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn normalize_ocr_base_url(base_url: &str) -> Option<String> {
-    let base_url = base_url.trim();
-    if base_url.is_empty() || !base_url.starts_with("https://") {
-        return None;
-    }
-    let base_url = base_url.split(['?', '#']).next().unwrap_or(base_url);
-    Some(if base_url.ends_with('/') {
-        base_url.to_string()
-    } else {
-        format!("{base_url}/")
-    })
-}
-
-#[cfg(not(target_os = "macos"))]
-fn derive_ocr_r2_base_url(endpoint: &str) -> Option<String> {
-    let endpoint = endpoint.trim();
-    if endpoint.is_empty() || !endpoint.starts_with("https://") {
-        return None;
-    }
-    let endpoint = endpoint
-        .split(['?', '#'])
-        .next()
-        .unwrap_or(endpoint)
-        .trim_end_matches('/');
-    let parent_index = endpoint.rfind('/')?;
-    let parent = &endpoint[..parent_index];
-    if parent.len() <= "https://".len() {
-        return None;
-    }
-    Some(format!("{parent}/ocr/"))
-}
-
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 fn ocr_manifest_file_installed(
     app: &tauri::AppHandle,
     file: &OcrManifestFile,
 ) -> Result<bool, String> {
-    if file.archive.as_deref() == Some("zip") {
-        if file.entries.is_empty() {
-            return Ok(false);
-        }
-        let install_dir = ocr_manifest_install_dir(app, file)?;
-        return file
-            .entries
-            .iter()
-            .map(|entry| install_dir.join(entry).exists())
-            .try_fold(true, |all_exist, exists| Ok(all_exist && exists));
-    }
-
     let target_path = ocr_manifest_file_path(app, file)?;
-    file_is_valid(&target_path, &file.sha256)
+    app.state::<AppState>()
+        .ocr_validation_cache
+        .is_valid(&target_path, &file.sha256, file_sha256)
 }
 
-#[cfg(not(target_os = "macos"))]
-fn ocr_download_target_path(
-    app: &tauri::AppHandle,
-    file: &OcrManifestFile,
-) -> Result<PathBuf, String> {
-    if file.archive.as_deref() == Some("zip") {
-        return Ok(ocr_download_dir(app)?.join(&file.name));
-    }
-
-    ocr_manifest_file_path(app, file)
-}
-
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 fn ocr_manifest_file_path(
     app: &tauri::AppHandle,
     file: &OcrManifestFile,
 ) -> Result<PathBuf, String> {
-    if file.role == "language" {
-        return Ok(ocr_asset_dir(app)?.join(&file.name));
-    }
-    Ok(ocr_manifest_install_dir(app, file)?.join(&file.name))
+    Ok(ocr_model_dir(app)?.join(&file.name))
 }
 
-#[cfg(not(target_os = "macos"))]
-fn ocr_manifest_install_dir(
-    app: &tauri::AppHandle,
-    file: &OcrManifestFile,
-) -> Result<PathBuf, String> {
-    let root = ocr_root_dir(app)?;
-    let install_dir = file
-        .install_dir
-        .as_deref()
-        .unwrap_or(if file.role == "engine" {
-            OCR_ENGINE_DIR
-        } else {
-            OCR_ASSET_DIR
-        });
-    validate_relative_path(install_dir)?;
-    let resolved = root.join(install_dir);
-    ensure_path_within(&root, &resolved)?;
-    Ok(resolved)
-}
-
-#[cfg(not(target_os = "macos"))]
-fn validate_relative_path(value: &str) -> Result<(), String> {
-    let path = Path::new(value);
-    if value.is_empty()
-        || path.is_absolute()
-        || value.contains('\\')
-        || path
-            .components()
-            .any(|component| !matches!(component, std::path::Component::Normal(_)))
-    {
-        return Err(format!("OCR manifest 路径不安全：{value}"));
-    }
-    Ok(())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn install_ocr_zip_archive(
-    app: &tauri::AppHandle,
-    file: &OcrManifestFile,
-    archive_path: &Path,
-) -> Result<(), String> {
-    let install_dir = ocr_manifest_install_dir(app, file)?;
-    if install_dir.exists() {
-        fs::remove_dir_all(&install_dir).map_err(|error| error.to_string())?;
-    }
-    fs::create_dir_all(&install_dir).map_err(|error| error.to_string())?;
-
-    let archive_file = fs::File::open(archive_path).map_err(|error| error.to_string())?;
-    let mut archive = ZipArchive::new(archive_file).map_err(|error| error.to_string())?;
-    for index in 0..archive.len() {
-        let mut zipped_file = archive.by_index(index).map_err(|error| error.to_string())?;
-        let Some(enclosed_name) = zipped_file.enclosed_name().map(PathBuf::from) else {
-            return Err("OCR portable zip 包含不安全路径".to_string());
-        };
-        let output_path = install_dir.join(enclosed_name);
-        ensure_path_within(&install_dir, &output_path)?;
-
-        if zipped_file.is_dir() {
-            fs::create_dir_all(&output_path).map_err(|error| error.to_string())?;
-            continue;
-        }
-
-        if let Some(parent) = output_path.parent() {
-            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        let mut output = fs::File::create(&output_path).map_err(|error| error.to_string())?;
-        std::io::copy(&mut zipped_file, &mut output).map_err(|error| error.to_string())?;
-    }
-
-    if !ocr_manifest_file_installed(app, file)? {
-        return Err(format!("{} 解压后文件不完整", file.name));
-    }
-    Ok(())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn ensure_path_within(root: &Path, path: &Path) -> Result<(), String> {
-    let root = root
-        .canonicalize()
-        .or_else(|_| {
-            fs::create_dir_all(root)
-                .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
-            root.canonicalize()
-        })
-        .map_err(|error| error.to_string())?;
-    let path = if path.exists() {
-        path.canonicalize().map_err(|error| error.to_string())?
-    } else {
-        let parent = path
-            .parent()
-            .ok_or_else(|| "OCR 路径无父目录".to_string())?;
-        let parent = parent
-            .canonicalize()
-            .or_else(|_| {
-                fs::create_dir_all(parent)
-                    .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
-                parent.canonicalize()
-            })
-            .map_err(|error| error.to_string())?;
-        parent.join(
-            path.file_name()
-                .ok_or_else(|| "OCR 路径无文件名".to_string())?,
-        )
-    };
-
-    if path.starts_with(root) {
-        Ok(())
-    } else {
-        Err("OCR 路径越界".to_string())
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn file_is_valid(path: &PathBuf, expected_sha256: &str) -> Result<bool, String> {
-    if !path.exists() {
-        return Ok(false);
-    }
-    let hash = file_sha256(path)?;
-    Ok(hash.eq_ignore_ascii_case(expected_sha256))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn file_sha256(path: &PathBuf) -> Result<String, String> {
+#[cfg(target_os = "windows")]
+fn file_sha256(path: &Path) -> Result<String, String> {
     let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
@@ -6021,36 +5934,7 @@ fn file_sha256(path: &PathBuf) -> Result<String, String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-#[cfg(not(target_os = "macos"))]
-fn read_ocr_manifest_cache(
-    app: &tauri::AppHandle,
-    mode: &str,
-) -> Result<Option<OcrManifest>, String> {
-    let path = ocr_manifest_cache_path(app, mode)?;
-    if !path.exists() {
-        return Ok(None);
-    }
-    let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    serde_json::from_str::<OcrManifest>(&content)
-        .map(Some)
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn write_ocr_manifest_cache(
-    app: &tauri::AppHandle,
-    mode: &str,
-    manifest: &OcrManifest,
-) -> Result<(), String> {
-    let path = ocr_manifest_cache_path(app, mode)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let content = serde_json::to_string_pretty(manifest).map_err(|error| error.to_string())?;
-    fs::write(path, content).map_err(|error| error.to_string())
-}
-
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 fn ocr_root_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
@@ -6058,25 +5942,27 @@ fn ocr_root_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .map(|path| path.join(OCR_DIR))
 }
 
-#[cfg(not(target_os = "macos"))]
-fn ocr_asset_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    Ok(ocr_root_dir(app)?.join(OCR_ASSET_DIR))
+#[cfg(target_os = "windows")]
+fn ocr_model_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(ocr_root_dir(app)?.join(OCR_MODEL_DIR))
 }
 
-#[cfg(not(target_os = "macos"))]
-fn ocr_engine_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    Ok(ocr_root_dir(app)?.join(OCR_ENGINE_DIR))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn ocr_download_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    Ok(ocr_root_dir(app)?.join("downloads"))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn ocr_manifest_cache_path(app: &tauri::AppHandle, mode: &str) -> Result<PathBuf, String> {
-    let mode = clean_ocr_mode(mode.to_string())?;
-    Ok(ocr_root_dir(app)?.join(format!("manifest-{mode}.json")))
+#[cfg(target_os = "windows")]
+fn remove_legacy_tesseract_assets(app: &tauri::AppHandle) -> Result<(), String> {
+    let root = ocr_root_dir(app)?;
+    for directory in ["tesseract", "assets", "downloads"] {
+        let path = root.join(directory);
+        if path.exists() {
+            fs::remove_dir_all(path).map_err(|error| error.to_string())?;
+        }
+    }
+    for manifest in ["manifest-fast.json", "manifest-best.json"] {
+        let path = root.join(manifest);
+        if path.exists() {
+            fs::remove_file(path).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 fn ocr_platform() -> &'static str {
@@ -6100,119 +5986,218 @@ fn ocr_platform() -> &'static str {
 
 fn emit_ocr_install_progress(
     app: &tauri::AppHandle,
+    mode: &str,
     phase: &str,
     file_name: Option<String>,
     downloaded_bytes: u64,
     total_bytes: u64,
+    network_bytes: u64,
 ) {
     let _ = app.emit(
         "ipaste://ocr-install-progress",
         OcrInstallProgress {
+            mode: mode.to_string(),
             phase: phase.to_string(),
             file_name,
             downloaded_bytes,
             total_bytes,
+            network_bytes,
         },
     );
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 fn recognize_image_text_inner(
     app: &tauri::AppHandle,
+    ocr_service: &windows_ocr::OcrService,
+    mode: &str,
     image_path: String,
-) -> Result<ImageOcrResult, String> {
+) -> Result<ImageOcrResult, ImageOcrError> {
     let image_path = PathBuf::from(image_path);
-    if !image_path.exists() {
-        return Err("图片文件不存在".to_string());
+    if !image_path.is_file() {
+        return Err("图片文件不存在".to_string().into());
     }
 
-    let tesseract = find_tesseract_executable(app)?;
-    let tessdata_dir = ocr_asset_dir(app)?;
-    if !tessdata_dir.join("eng.traineddata").exists()
-        || !tessdata_dir.join("chi_sim.traineddata").exists()
-    {
-        return Err("请先在偏好设置中下载图片 OCR 资源".to_string());
+    let model_dir = ocr_model_dir(app)?;
+    if !ocr_service.is_loaded(mode, &model_dir)? {
+        let status = ocr_install_status(app, mode)?;
+        if !status.installed {
+            return Err(if status.needs_repair {
+                ImageOcrError::ModelsIncomplete {
+                    missing_files: status.missing_files,
+                }
+            } else {
+                ImageOcrError::ModelsMissing {
+                    missing_files: status.missing_files,
+                }
+            });
+        }
     }
 
-    let output = Command::new(&tesseract)
-        .arg(&image_path)
-        .arg("stdout")
-        .arg("-l")
-        .arg("chi_sim+eng")
-        .arg("--tessdata-dir")
-        .arg(&tessdata_dir)
-        .arg("-c")
-        .arg("tessedit_create_tsv=1")
-        .output()
-        .map_err(|error| format!("无法启动 Tesseract：{error}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            "Tesseract 识别失败".to_string()
-        } else {
-            stderr
-        });
-    }
-
-    let tsv = String::from_utf8_lossy(&output.stdout);
-    let words = parse_tesseract_tsv(&tsv);
-    let text = words
+    let output = ocr_service.recognize(mode, &model_dir, &image_path)?;
+    let text = output
+        .lines
         .iter()
-        .map(|word| word.text.as_str())
+        .map(|line| line.text.trim())
+        .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
-        .join(" ");
+        .join("\n");
+    let words = paddle_ocr_words(&output.lines);
     Ok(ImageOcrResult {
         text,
-        engine: tesseract.to_string_lossy().to_string(),
-        language: "chi_sim+eng".to_string(),
+        engine: format!("{}:{}", windows_ocr::ENGINE_ID, output.model_set),
+        language: windows_ocr::LANGUAGE.to_string(),
         words,
     })
 }
 
-#[cfg(not(target_os = "macos"))]
-fn find_tesseract_executable(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let app_data_tesseract = ocr_engine_dir(app)?.join("tesseract.exe");
-    if app_data_tesseract.exists() {
-        return Ok(app_data_tesseract);
-    }
-
-    Err("未找到 Tesseract 引擎。请先在偏好设置中下载图片 OCR 资源。".to_string())
+#[cfg(target_os = "windows")]
+#[derive(Debug)]
+struct WeightedOcrToken {
+    text: String,
+    start: f64,
+    end: f64,
 }
 
-#[cfg(not(target_os = "macos"))]
-fn parse_tesseract_tsv(tsv: &str) -> Vec<ImageOcrWord> {
-    tsv.lines()
-        .skip(1)
-        .filter_map(parse_tesseract_tsv_line)
-        .collect()
+#[cfg(target_os = "windows")]
+fn paddle_ocr_words(lines: &[windows_ocr::RecognizedLine]) -> Vec<ImageOcrWord> {
+    let mut words = Vec::new();
+    for (line_index, line) in lines.iter().enumerate() {
+        let tokens = weighted_ocr_tokens(&line.text);
+        let min_x = line
+            .points
+            .iter()
+            .map(|point| point[0] as f64)
+            .fold(f64::INFINITY, f64::min);
+        let max_x = line
+            .points
+            .iter()
+            .map(|point| point[0] as f64)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let min_y = line
+            .points
+            .iter()
+            .map(|point| point[1] as f64)
+            .fold(f64::INFINITY, f64::min);
+        let max_y = line
+            .points
+            .iter()
+            .map(|point| point[1] as f64)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let width = (max_x - min_x).max(1.0);
+        let height = (max_y - min_y).max(1.0);
+        let confidence = (line.score as f64 * 100.0).clamp(0.0, 100.0);
+
+        if tokens.is_empty() {
+            continue;
+        }
+
+        let total_weight = tokens.last().map(|token| token.end).unwrap_or(1.0).max(1.0);
+        let is_vertical = height > width * 1.2;
+        for (word_index, token) in tokens.into_iter().enumerate() {
+            let start_ratio = (token.start / total_weight).clamp(0.0, 1.0);
+            let end_ratio = (token.end / total_weight).clamp(start_ratio, 1.0);
+            let (left, top, token_width, token_height) = if is_vertical {
+                let top = min_y + height * start_ratio;
+                (
+                    min_x,
+                    top,
+                    width,
+                    (height * (end_ratio - start_ratio)).max(1.0),
+                )
+            } else {
+                let left = min_x + width * start_ratio;
+                (
+                    left,
+                    min_y,
+                    (width * (end_ratio - start_ratio)).max(1.0),
+                    height,
+                )
+            };
+            words.push(ImageOcrWord {
+                text: token.text,
+                left,
+                top,
+                width: token_width,
+                height: token_height,
+                confidence,
+                block_index: 0,
+                paragraph_index: 0,
+                line_index: line_index as i64,
+                word_index: word_index as i64,
+            });
+        }
+    }
+    words
 }
 
-#[cfg(not(target_os = "macos"))]
-fn parse_tesseract_tsv_line(line: &str) -> Option<ImageOcrWord> {
-    let columns = line.split('\t').collect::<Vec<_>>();
-    if columns.len() < 12 || columns.first()? != &"5" {
-        return None;
+#[cfg(target_os = "windows")]
+fn weighted_ocr_tokens(text: &str) -> Vec<WeightedOcrToken> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut current_start = 0.0;
+    let mut position = 0.0;
+
+    for char in text.chars() {
+        let weight = ocr_char_weight(char);
+        if char.is_whitespace() {
+            push_weighted_ocr_token(&mut tokens, &mut current, current_start, position);
+            position += weight;
+            current_start = position;
+            continue;
+        }
+
+        if is_cjk_char(char) {
+            push_weighted_ocr_token(&mut tokens, &mut current, current_start, position);
+            let end = position + weight;
+            tokens.push(WeightedOcrToken {
+                text: char.to_string(),
+                start: position,
+                end,
+            });
+            position = end;
+            current_start = position;
+            continue;
+        }
+
+        if current.is_empty() {
+            current_start = position;
+        }
+        current.push(char);
+        position += weight;
     }
 
-    let text = columns[11].trim();
-    let confidence = columns[10].parse::<f64>().ok()?;
-    if text.is_empty() || confidence < 0.0 {
-        return None;
-    }
+    push_weighted_ocr_token(&mut tokens, &mut current, current_start, position);
+    tokens
+}
 
-    Some(ImageOcrWord {
-        text: text.to_string(),
-        left: parse_tsv_number(columns[6])?,
-        top: parse_tsv_number(columns[7])?,
-        width: parse_tsv_number(columns[8])?,
-        height: parse_tsv_number(columns[9])?,
-        confidence,
-        block_index: columns[2].parse::<i64>().ok()?,
-        paragraph_index: columns[3].parse::<i64>().ok()?,
-        line_index: columns[4].parse::<i64>().ok()?,
-        word_index: columns[5].parse::<i64>().ok()?,
-    })
+#[cfg(target_os = "windows")]
+fn push_weighted_ocr_token(
+    tokens: &mut Vec<WeightedOcrToken>,
+    current: &mut String,
+    start: f64,
+    end: f64,
+) {
+    if !current.is_empty() && end > start {
+        tokens.push(WeightedOcrToken {
+            text: std::mem::take(current),
+            start,
+            end,
+        });
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn ocr_char_weight(char: char) -> f64 {
+    if char.is_whitespace() {
+        0.5
+    } else if is_cjk_char(char) {
+        1.0
+    } else if char.is_ascii() {
+        0.55
+    } else {
+        0.75
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -6525,7 +6510,6 @@ fn candidate_string_utf16_len(candidate: &AnyObject) -> usize {
     value.length()
 }
 
-#[cfg(target_os = "macos")]
 fn is_cjk_char(char: char) -> bool {
     matches!(
         char as u32,
@@ -6535,11 +6519,6 @@ fn is_cjk_char(char: char) -> bool {
             | 0x3040..=0x30FF
             | 0xAC00..=0xD7AF
     )
-}
-
-#[cfg(not(target_os = "macos"))]
-fn parse_tsv_number(value: &str) -> Option<f64> {
-    value.parse::<f64>().ok()
 }
 
 #[allow(dead_code)]

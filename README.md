@@ -50,7 +50,7 @@ Linux is not an official target yet. Tauri is cross-platform, but this repositor
 4. Search, select an item, and press Enter to paste it back into the active app.
 5. Save long-term reusable content into categories and organize it around your workflow.
 
-Auto paste on macOS requires Accessibility permission. Image OCR on Windows requires downloading Tesseract assets from Settings.
+Auto paste on macOS requires Accessibility permission. Image OCR on Windows requires downloading a PP-OCRv6 Tiny or Small model from Settings.
 
 ## Privacy And Data
 
@@ -70,7 +70,7 @@ If your clipboard often contains passwords, keys, client data, or internal compa
 | Platform | Status | Notes |
 | --- | --- | --- |
 | macOS | Supported | OCR uses the system Vision framework; auto paste requires Accessibility permission. |
-| Windows | Supported | OCR uses downloadable Tesseract assets. |
+| Windows | Supported | OCR uses bundled ONNX Runtime with downloadable PP-OCRv6 models. |
 | Linux | Not supported yet | No official release or full validation at the moment. |
 
 ## Tech Stack
@@ -157,7 +157,7 @@ The desktop app can connect to a self-hosted iPaste sync API using an API addres
 
 ### Image OCR
 
-macOS uses the system Vision framework. Windows uses Tesseract assets that can be installed from app preferences.
+macOS uses the system Vision framework. Windows runs PaddleOCR PP-OCRv6 models in-process with ONNX Runtime; Tiny and Small models can be installed from app preferences.
 
 ## Contributing
 

@@ -2,3 +2,9 @@ iPaste
 Copyright 2026 iPaste Contributors
 
 This product includes software developed by the iPaste Contributors.
+
+Windows image OCR uses PaddleOCR model assets and RapidOCR-compatible
+post-processing. PaddleOCR and rapidocr-core are licensed under Apache-2.0.
+
+Windows ONNX inference uses Microsoft ONNX Runtime, licensed under the MIT
+License. Its license and third-party notices are included with Windows builds.

@@ -11,6 +11,7 @@ node_modules
 dist
 dist-ssr
 *.local
+src-tauri/runtime/
 .wrangler/
 key/*.key
 !key/*.key.pub

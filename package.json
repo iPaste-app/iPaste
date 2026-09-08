@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
+    "prepare:onnx-runtime": "node scripts/prepare-onnx-runtime.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "release": "node scripts/bump-version.mjs"

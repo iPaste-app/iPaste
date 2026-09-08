@@ -50,7 +50,7 @@ Linux n'est pas encore une cible officielle. Tauri est multiplateforme, mais ce 
 4. Recherchez, sélectionnez un élément, puis appuyez sur Enter pour le coller dans l'application active.
 5. Enregistrez le contenu réutilisable à long terme dans des catégories et organisez-le autour de votre workflow.
 
-Le collage automatique sur macOS nécessite l'autorisation Accessibilité. L'OCR d'image sur Windows nécessite de télécharger les ressources Tesseract depuis Settings.
+Le collage automatique sur macOS nécessite l'autorisation Accessibilité. L'OCR d'image sur Windows nécessite de télécharger un modèle PP-OCRv6 Tiny ou Small depuis Settings.
 
 ## Privacy And Data
 
@@ -70,7 +70,7 @@ Si votre presse-papiers contient souvent des mots de passe, clés, données clie
 | Platform | Status | Notes |
 | --- | --- | --- |
 | macOS | Supported | L'OCR utilise le framework Vision du système; le collage automatique nécessite l'autorisation Accessibilité. |
-| Windows | Supported | L'OCR utilise des ressources Tesseract téléchargeables. |
+| Windows | Supported | L'OCR utilise ONNX Runtime intégré et des modèles PP-OCRv6 téléchargeables. |
 | Linux | Not supported yet | Aucune version officielle ni validation complète pour le moment. |
 
 ## Tech Stack
@@ -157,7 +157,7 @@ L'application de bureau peut se connecter à une iPaste sync API autohébergée 
 
 ### Image OCR
 
-macOS utilise le framework Vision du système. Windows utilise des ressources Tesseract qui peuvent être installées depuis les préférences de l'application.
+macOS utilise le framework Vision du système. Windows exécute PaddleOCR PP-OCRv6 dans le processus avec ONNX Runtime ; les modèles Tiny et Small s'installent depuis les préférences.
 
 ## Contributing
 
