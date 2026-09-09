@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ClipboardPlus, Download, Search, Settings, X } from "lucide-vue-next";
 import { t } from "../i18n";
+import DownloadProgressBorder from "./DownloadProgressBorder.vue";
 
 const logoUrl = new URL("../../src-tauri/icons/32x32.png", import.meta.url).href;
 
@@ -14,6 +15,9 @@ const props = defineProps<{
   appendCopyTimeoutMinutes: number;
   hasUpdate?: boolean;
   checkingUpdate?: boolean;
+  downloadingUpdate?: boolean;
+  updateProgress?: number | null;
+  updateLabel?: string;
 }>();
 
 const emit = defineEmits<{
@@ -105,13 +109,18 @@ function startMainWindowDrag() {
       v-if="hasUpdate"
       type="button"
       class="icon-button update-icon-button"
-      :class="{ 'update-icon-button-checking': checkingUpdate }"
+      :class="{ 'update-icon-button-checking': checkingUpdate, 'update-icon-button-downloading': downloadingUpdate }"
       tabindex="-1"
-      :aria-label="t('topBar.openUpdate')"
-      :data-tooltip="t('topBar.openUpdate')"
+      :aria-label="updateLabel ?? t('topBar.openUpdate')"
+      :data-tooltip="updateLabel ?? t('topBar.openUpdate')"
       @click.stop="emit('openUpdate')"
     >
       <Download class="size-4" />
+      <DownloadProgressBorder
+        v-if="downloadingUpdate"
+        :progress="updateProgress ?? null"
+        :label="updateLabel ?? t('update.button.downloading')"
+      />
     </button>
 
     <button

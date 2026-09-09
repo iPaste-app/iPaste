@@ -35,6 +35,7 @@ import {
 import LanguageSelect from "./LanguageSelect.vue";
 import OcrSettingsPanel from "./OcrSettingsPanel.vue";
 import UpdateDialog from "./UpdateDialog.vue";
+import DownloadProgressBorder from "./DownloadProgressBorder.vue";
 import { useUpdater } from "../composables/useUpdater";
 import { useSettingsNavigation } from "../composables/useSettingsNavigation";
 import { languageOptions, t } from "../i18n";
@@ -839,11 +840,12 @@ async function updateLanguage(language: Language) {
               <button
                 type="button"
                 class="settings-action-button settings-action-button-primary about-update-button"
-                :disabled="updater.isUpdateBusy.value"
+                :class="{ 'about-update-button-downloading': updater.updateStatus.value === 'downloading' }"
+                :disabled="updater.updateStatus.value === 'checking'"
                 @click="updater.openUpdateDialog"
               >
                 <ChevronRight
-                  v-if="updater.updateStatus.value === 'available' || updater.updateStatus.value === 'ready'"
+                  v-if="updater.hasAvailableUpdate.value"
                   class="size-4"
                 />
                 <RefreshCw
@@ -852,6 +854,11 @@ async function updateLanguage(language: Language) {
                   :class="{ 'update-spin': updater.updateStatus.value === 'checking' }"
                 />
                 <span>{{ updater.updateButtonText.value }}</span>
+                <DownloadProgressBorder
+                  v-if="updater.updateStatus.value === 'downloading'"
+                  :progress="updater.updateProgressPercent.value"
+                  :label="updater.updateButtonText.value"
+                />
               </button>
             </section>
 

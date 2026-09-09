@@ -801,6 +801,14 @@ async function openClipViewer(item: ClipViewItem) {
 function handleKeydown(event: KeyboardEvent) {
   if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
 
+  if (updater.updateDialogOpen.value) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      updater.dismissUpdateDialog();
+    }
+    return;
+  }
+
   if (showStarPrompt.value && event.target instanceof HTMLElement && event.target.closest(".star-prompt")) {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -885,6 +893,10 @@ function hasQuickPreviewModifier(event: KeyboardEvent) {
 type PanelKey = "ArrowDown" | "ArrowUp" | "ArrowRight" | "ArrowLeft" | "Enter" | "Escape";
 
 function handlePanelKey(key: string) {
+  if (updater.updateDialogOpen.value) {
+    if (key === "Escape") updater.dismissUpdateDialog();
+    return true;
+  }
   if (showStarPrompt.value && key === "Escape") {
     hideStarSupport();
     return true;
@@ -1189,6 +1201,9 @@ function scrollSelectedClipIntoView() {
           :append-copy-enabled="store.isAppendCopyEnabled"
           :append-copy-timeout-minutes="store.appendCopyTimeoutMinutes"
           :has-update="updater.hasAvailableUpdate.value"
+          :downloading-update="updater.updateStatus.value === 'downloading'"
+          :update-progress="updater.updateProgressPercent.value"
+          :update-label="updater.updateButtonText.value"
           @toggle-settings="store.showSettings"
           @toggle-append-copy="store.toggleAppendCopy"
           @open-update="updater.openUpdateDialog"

@@ -19,7 +19,7 @@ export async function openGitHubRelease(version: string) {
   await openExternalUrl(getGitHubReleaseUrl(version));
 }
 
-async function openExternalUrl(url: string) {
+export async function openExternalUrl(url: string) {
   if ("__TAURI_INTERNALS__" in window) {
     await openUrl(url);
     return;

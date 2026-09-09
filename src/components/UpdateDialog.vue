@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { AlertCircle, CheckCircle2, Download, ExternalLink, RotateCw, X } from "lucide-vue-next";
+import { computed, nextTick, ref, watch } from "vue";
+import { Download, ExternalLink, RotateCw, X } from "lucide-vue-next";
 import { cleanUpdateNotes, type UpdateErrorPhase, type UpdateStatus } from "../composables/useUpdater";
 import { t } from "../i18n";
 import { openGitHubRelease } from "../lib/starPrompt";
+import MarkdownPreview from "./MarkdownPreview.vue";
 
 type UpdateDialogInfo = {
   currentVersion: string;
@@ -27,6 +28,19 @@ const emit = defineEmits<{
   install: [];
   relaunch: [];
 }>();
+
+const dialogElement = ref<HTMLElement | null>(null);
+let previousFocus: HTMLElement | null = null;
+
+watch(() => props.open, async (open) => {
+  if (open) {
+    previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    await nextTick();
+    if (props.open) dialogElement.value?.focus({ preventScroll: true });
+  } else if (previousFocus?.isConnected) {
+    previousFocus.focus({ preventScroll: true });
+  }
+}, { immediate: true });
 
 const title = computed(() => {
   if (props.status === "downloading") return t("update.title.downloading");
@@ -80,24 +94,25 @@ async function openReleaseNotes() {
 
 <template>
   <div v-if="open" class="update-dialog-backdrop" @click.self="emit('dismiss')">
-    <section class="update-dialog" role="alertdialog" aria-modal="true" aria-labelledby="update-dialog-title">
+    <section
+      ref="dialogElement"
+      class="update-dialog"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="update-dialog-title"
+      tabindex="-1"
+      @keydown.esc.stop.prevent="emit('dismiss')"
+    >
       <header class="update-dialog-header">
-        <div class="update-dialog-icon" :class="{ 'update-dialog-icon-error': status === 'error' }">
-          <AlertCircle v-if="status === 'error'" class="size-5" />
-          <CheckCircle2 v-else-if="status === 'ready'" class="size-5" />
-          <Download v-else class="size-5" />
-        </div>
-        <div class="min-w-0">
-          <h2 id="update-dialog-title">{{ title }}</h2>
-          <p v-if="update">
-            {{ t("update.versionLine", { current: currentVersion ?? update.currentVersion, next: update.version }) }}
-          </p>
-        </div>
+        <h2 id="update-dialog-title">
+          <span>{{ title }}</span>
+          <span v-if="update" class="update-dialog-version">
+            {{ currentVersion ?? update.currentVersion }} → {{ update.version }}
+          </span>
+        </h2>
         <button
           type="button"
           class="update-dialog-close"
-          :disabled="status === 'downloading'"
-          tabindex="-1"
           :aria-label="t('update.closePrompt')"
           :data-tooltip="t('update.closePrompt')"
           @click="emit('dismiss')"
@@ -106,17 +121,14 @@ async function openReleaseNotes() {
         </button>
       </header>
 
-      <div v-if="status === 'available'" class="update-dialog-body">
-        <p>
-          {{ t("update.availableBody") }}
-        </p>
-        <div v-if="releaseNotes" class="update-release-notes">
-          {{ releaseNotes }}
+      <div v-if="status === 'available'" class="update-dialog-body update-dialog-notes-body">
+        <div class="update-release-panel">
+          <MarkdownPreview v-if="releaseNotes" class="update-release-notes" :source="releaseNotes" />
+          <button type="button" class="update-release-link" @click="openReleaseNotes">
+            <span>{{ releaseNotesLinkText }}</span>
+            <ExternalLink class="size-3.5" aria-hidden="true" />
+          </button>
         </div>
-        <button type="button" class="update-release-link" @click="openReleaseNotes">
-          <span>{{ releaseNotesLinkText }}</span>
-          <ExternalLink class="size-3.5" aria-hidden="true" />
-        </button>
       </div>
 
       <div v-else-if="status === 'downloading'" class="update-dialog-body">
@@ -139,10 +151,17 @@ async function openReleaseNotes() {
 
       <footer class="update-dialog-actions">
         <button
+          v-if="status === 'downloading'"
+          type="button"
+          class="settings-action-button"
+          @click="emit('dismiss')"
+        >
+          <span>{{ t("update.downloadInBackground") }}</span>
+        </button>
+        <button
           v-if="status === 'available'"
           type="button"
           class="settings-action-button"
-          tabindex="-1"
           @click="emit('dismiss')"
         >
           <span>{{ t("common.later") }}</span>
@@ -151,7 +170,6 @@ async function openReleaseNotes() {
           v-if="status === 'available'"
           type="button"
           class="settings-action-button settings-action-button-primary"
-          tabindex="-1"
           @click="emit('install')"
         >
           <Download class="size-4" />
@@ -161,7 +179,6 @@ async function openReleaseNotes() {
           v-else-if="status === 'ready'"
           type="button"
           class="settings-action-button settings-action-button-primary"
-          tabindex="-1"
           @click="emit('relaunch')"
         >
           <RotateCw class="size-4" />
@@ -171,7 +188,6 @@ async function openReleaseNotes() {
           v-else-if="status === 'error'"
           type="button"
           class="settings-action-button"
-          tabindex="-1"
           @click="emit('dismiss')"
         >
           <span>{{ t("common.gotIt") }}</span>

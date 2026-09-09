@@ -26,3 +26,4 @@ key/*.key
 *.njsproj
 *.sln
 *.sw?
+.cargo
