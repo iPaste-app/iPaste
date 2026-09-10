@@ -5,7 +5,7 @@ import { ClipboardPlus, Download, Search, Settings, X } from "lucide-vue-next";
 import { t } from "../i18n";
 import DownloadProgressBorder from "./DownloadProgressBorder.vue";
 
-const logoUrl = new URL("../../src-tauri/icons/32x32.png", import.meta.url).href;
+const logoUrl = new URL("../../src-tauri/icons/128x128.png", import.meta.url).href;
 
 const props = defineProps<{
   modelValue: string;

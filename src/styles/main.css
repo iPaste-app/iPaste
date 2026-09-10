@@ -101,7 +101,7 @@ input:focus-visible {
   height: 1.75rem;
   flex: 0 0 auto;
   border-radius: 0.5rem;
-  box-shadow: 0 5px 14px rgba(15, 23, 42, 0.12);
+  object-fit: contain;
 }
 
 .top-bar-brand {
