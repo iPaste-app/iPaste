@@ -12,10 +12,13 @@ import StarPrompt from "./components/StarPrompt.vue";
 import TopBar from "./components/TopBar.vue";
 import UpdateDialog from "./components/UpdateDialog.vue";
 import { useUpdater } from "./composables/useUpdater";
+import { usePanelViewport } from "./composables/usePanelViewport";
+import { useElementWidth } from "./composables/useElementWidth";
 import { cleanLanguage, setLanguage, t } from "./i18n";
 import { clipImageSrc } from "./lib/clipMedia";
 import { categoryDisplayName, clipMetricText, formatShortcut, formatTime, typeLabel } from "./lib/format";
 import { ipasteApi } from "./lib/ipasteApi";
+import { clipColumnCount, selectionDelta, submenuPlacement } from "./lib/panelLayout";
 import { openGitHubRepository } from "./lib/starPrompt";
 import { useIpasteStore } from "./stores/ipasteStore";
 import type { Category, ClipViewItem } from "./types";
@@ -39,6 +42,7 @@ const moveSubmenuBranchElement = ref<HTMLElement | null>(null);
 const moveSubmenuElement = ref<HTMLElement | null>(null);
 const showMoveSubmenu = ref(false);
 const submenuAlignLeft = ref(false);
+const submenuInline = ref(false);
 const submenuOffsetTop = ref(0);
 const editingCategoryId = ref<string | null>(null);
 const categoryRailElement = ref<InstanceType<typeof CategoryRail> | null>(null);
@@ -113,7 +117,14 @@ const categoryItemCounts = computed(() =>
 );
 
 const formattedShortcut = computed(() => `${formatShortcut("CommandOrControl+F")} ${t("shortcut.search")}`);
+const { width: panelWidth, flushSize } = usePanelViewport(!isSettingsWindow && !isClipViewerWindow, () => {
+  closeFloatingLayers();
+  scheduleSelectedClipScroll();
+});
 const isSideLayout = computed(() => store.panelLayout === "side");
+const categoryRailWidth = useElementWidth(() => categoryRailElement.value?.$el);
+const columnCount = computed(() => clipColumnCount(panelWidth.value, isSideLayout.value ? categoryRailWidth.value : 0));
+const isSingleColumn = computed(() => columnCount.value === 1);
 const canReorderVisibleItems = computed(() =>
   store.selectedCategoryId !== "history" && !store.search.trim()
     && !store.isUpdatingPin && !store.isReorderingCategoryItems && store.visibleItems.length > 1,
@@ -241,6 +252,7 @@ function applyPanelVisibility(
   const nativePanel = payload.visible && Boolean(payload.nativePanel);
   isPreservingCurrentApp.value = payload.visible && payload.preservesCurrentApp && !nativePanel;
   if (!payload.visible) {
+    void flushSize();
     clearStarPromptTimer();
     clearStarThanksTimer();
     showStarPrompt.value = false;
@@ -411,6 +423,7 @@ function itemCategoryTags(item: ClipViewItem) {
 }
 
 function openClipContextMenu(payload: { item: ClipViewItem; index: number; x: number; y: number }) {
+  closeMoveSubmenu();
   store.setSelectedIndex(payload.index);
   pendingDeleteContextKey.value = null;
   contextMenu.value = payload;
@@ -925,23 +938,9 @@ function handlePanelKey(key: string) {
     return false;
   }
 
-  if (key === "ArrowDown") {
-    store.moveSelection(2);
-    return true;
-  }
-
-  if (key === "ArrowUp") {
-    store.moveSelection(-2);
-    return true;
-  }
-
-  if (key === "ArrowRight") {
-    store.moveSelection(1);
-    return true;
-  }
-
-  if (key === "ArrowLeft") {
-    store.moveSelection(-1);
+  const delta = selectionDelta(key, columnCount.value);
+  if (delta !== null) {
+    store.moveSelection(delta);
     return true;
   }
 
@@ -990,6 +989,7 @@ function focusSearch() {
 
 async function hidePanelFromUi() {
   blurActiveElement();
+  await flushSize();
   await store.hidePanel();
 }
 
@@ -1054,13 +1054,20 @@ async function focusEditingClipName() {
 
 async function openMoveSubmenu() {
   clearMoveSubmenuCloseTimer();
+  if (showMoveSubmenu.value) return;
+  submenuInline.value = false;
   showMoveSubmenu.value = true;
   await nextTick();
   positionMoveSubmenu();
+  await nextTick();
+  positionContextMenu();
 }
 
 function scheduleCloseMoveSubmenu() {
   clearMoveSubmenuCloseTimer();
+  // Inline expansion can move the parent menu away from the pointer near an edge.
+  // Keep it open until selection or dismissal, like an accordion.
+  if (submenuInline.value) return;
   moveSubmenuCloseTimer = window.setTimeout(() => {
     showMoveSubmenu.value = false;
     moveSubmenuCloseTimer = null;
@@ -1129,14 +1136,16 @@ function clearClipListResetFrame() {
 
 function positionMoveSubmenu() {
   if (!moveSubmenuBranchElement.value || !moveSubmenuElement.value) return;
+  if (submenuInline.value) return;
 
   const branchRect = moveSubmenuBranchElement.value.getBoundingClientRect();
   const submenuRect = moveSubmenuElement.value.getBoundingClientRect();
   const padding = 8;
   const maxY = Math.max(padding, window.innerHeight - submenuRect.height - padding);
 
-  submenuAlignLeft.value = branchRect.right + submenuRect.width + padding > window.innerWidth
-    && branchRect.left - submenuRect.width - padding >= padding;
+  const placement = submenuPlacement(branchRect, submenuRect.width, window.innerWidth);
+  submenuInline.value = placement.inline;
+  submenuAlignLeft.value = placement.alignLeft;
   submenuOffsetTop.value = clamp(branchRect.top, padding, maxY) - branchRect.top;
 }
 
@@ -1256,7 +1265,7 @@ function scrollSelectedClipIntoView() {
 
       <section
         class="main-content"
-        :class="{ 'main-content-side': isSideLayout }"
+        :class="{ 'main-content-side': isSideLayout, 'main-content-single-column': isSingleColumn }"
       >
         <CategoryRail
           ref="categoryRailElement"
@@ -1265,6 +1274,7 @@ function scrollSelectedClipIntoView() {
           :editing-category-id="editingCategoryId"
           :history-count="store.clipTotalCount"
           :category-counts="categoryItemCounts"
+          :hide-counts="isSingleColumn"
           :orientation="isSideLayout ? 'vertical' : 'horizontal'"
           @select="store.selectCategory"
           @create="createCategory"
@@ -1418,6 +1428,7 @@ function scrollSelectedClipIntoView() {
       v-if="contextMenu"
       ref="contextMenuElement"
       class="clip-context-menu"
+      :class="{ 'clip-context-menu-inline': submenuInline && showMoveSubmenu }"
       :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
       role="menu"
       @click.stop
@@ -1455,17 +1466,18 @@ function scrollSelectedClipIntoView() {
         @mouseenter="openMoveSubmenu"
         @mouseleave="scheduleCloseMoveSubmenu"
       >
-        <button type="button" class="context-menu-item" tabindex="-1" role="menuitem" @click.stop="openMoveSubmenu">
+        <button type="button" class="context-menu-item" tabindex="-1" role="menuitem" aria-haspopup="menu" :aria-expanded="showMoveSubmenu" @click.stop="openMoveSubmenu">
           <FolderInput class="size-4" />
           <span>{{ t("context.moveTo") }}</span>
-          <ChevronRight class="ml-auto size-4 text-slate-400" />
+          <ChevronRight class="ml-auto size-4 text-slate-400" :class="{ 'rotate-90': submenuInline && showMoveSubmenu }" />
         </button>
         <div
           v-if="showMoveSubmenu"
           ref="moveSubmenuElement"
           class="clip-context-submenu"
-          :class="{ 'clip-context-submenu-left': submenuAlignLeft }"
-          :style="{ top: `${submenuOffsetTop}px` }"
+          role="menu"
+          :class="{ 'clip-context-submenu-left': submenuAlignLeft, 'clip-context-submenu-inline': submenuInline }"
+          :style="submenuInline ? undefined : { top: `${submenuOffsetTop}px` }"
           @mouseenter="openMoveSubmenu"
           @mouseleave="scheduleCloseMoveSubmenu"
         >

@@ -499,12 +499,20 @@ body.ipaste-preserve-current-app .global-tooltip,
   display: grid;
   width: 100%;
   min-width: 0;
-  grid-template-columns: repeat(auto-fit, minmax(min(15rem, 100%), 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
-.main-content-side .clip-card-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.main-content-single-column .clip-card-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.main-content-single-column .clip-card {
+  height: 7rem;
+}
+
+.main-content-single-column .clip-list-scroll {
+  padding: 0.75rem;
 }
 
 .clip-grid-full {
@@ -1615,6 +1623,7 @@ body.ipaste-preserve-current-app .global-tooltip,
   position: fixed;
   z-index: 60;
   width: 10rem;
+  max-width: calc(100vw - 1rem);
   overflow: visible;
   border: 1px solid rgba(148, 163, 184, 0.72);
   border-radius: 0.75rem;
@@ -1650,6 +1659,7 @@ body.ipaste-preserve-current-app .global-tooltip,
   left: calc(100% + 0.5rem);
   top: 0;
   width: 10.5rem;
+  max-width: calc(100vw - 1rem);
   max-height: calc(100vh - 1rem);
   overflow-y: auto;
   overflow-x: hidden;
@@ -1666,6 +1676,45 @@ body.ipaste-preserve-current-app .global-tooltip,
 .clip-context-submenu-left {
   right: calc(100% + 0.5rem);
   left: auto;
+}
+
+.clip-context-menu-inline {
+  max-height: calc(100vh - 1rem);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.clip-context-submenu-inline {
+  position: static;
+  width: 100%;
+  max-height: 12rem;
+  margin-block: 0.25rem;
+  border-radius: 0.5rem;
+  background: #f8fafc;
+  padding: 0.125rem;
+  box-shadow: none;
+}
+
+@media (width < 560px) {
+  .top-bar {
+    height: auto;
+    min-height: 3.75rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem 0.75rem;
+  }
+
+  .top-bar-spacer {
+    min-width: 0;
+  }
+
+  .top-bar .search-box {
+    position: static;
+    order: 1;
+    width: 100%;
+    flex: 0 0 100%;
+    transform: none;
+  }
 }
 
 .context-menu-item,
@@ -3377,6 +3426,7 @@ body.ipaste-preserve-current-app .global-tooltip,
   inset: 0;
   z-index: 95;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
   background: rgba(15, 23, 42, 0.34);
   padding: 1rem;
@@ -3385,10 +3435,12 @@ body.ipaste-preserve-current-app .global-tooltip,
 
 .update-dialog {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   width: min(100%, 32rem);
   max-height: calc(100dvh - 2rem);
   overflow: hidden;
+  overflow-wrap: anywhere;
   border: 1px solid rgba(148, 163, 184, 0.72);
   border-radius: 0.875rem;
   background: rgba(255, 255, 255, 0.98);
@@ -3410,6 +3462,7 @@ body.ipaste-preserve-current-app .global-tooltip,
 .update-dialog-header h2 {
   display: flex;
   min-width: 0;
+  flex: 1 1 auto;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0.25rem 0.625rem;
@@ -3417,6 +3470,11 @@ body.ipaste-preserve-current-app .global-tooltip,
   color: #0f172a;
   font-size: 1rem;
   font-weight: 750;
+}
+
+.update-dialog-header h2 > span {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .update-dialog-version {
@@ -3447,6 +3505,7 @@ body.ipaste-preserve-current-app .global-tooltip,
 }
 
 .update-dialog-body {
+  min-width: 0;
   min-height: 0;
   overflow: auto;
   padding: 0.625rem 0.875rem;
@@ -3468,6 +3527,7 @@ body.ipaste-preserve-current-app .global-tooltip,
 
 .update-release-panel {
   display: flex;
+  min-width: 0;
   min-height: 0;
   flex-direction: column;
   border: 1px solid #e2e8f0;
@@ -3488,6 +3548,8 @@ body.ipaste-preserve-current-app .global-tooltip,
 
 .update-release-link {
   display: inline-flex;
+  min-width: 0;
+  max-width: calc(100% - 1.25rem);
   min-height: 1.75rem;
   flex: 0 0 auto;
   align-self: flex-end;
@@ -3552,11 +3614,40 @@ body.ipaste-preserve-current-app .global-tooltip,
 }
 
 .update-dialog-actions .settings-action-button {
-  width: 8.5rem;
-  min-width: max-content;
+  width: max-content;
+  min-width: min(8.5rem, 100%);
+  max-width: 100%;
   flex: 0 0 auto;
   padding: 0.375rem 0.625rem;
-  white-space: nowrap;
+  white-space: normal;
+}
+
+.update-dialog-actions .settings-action-button > span,
+.update-release-link > span {
+  min-width: 0;
+}
+
+.update-dialog-actions .settings-action-button > svg,
+.update-release-link > svg {
+  flex-shrink: 0;
+}
+
+@media (width < 360px) {
+  .update-dialog-backdrop {
+    padding: 0.5rem;
+  }
+
+  .update-dialog {
+    max-height: calc(100dvh - 1rem);
+  }
+
+  .update-dialog-notes-body {
+    padding: 0.625rem;
+  }
+
+  .update-dialog-actions .settings-action-button {
+    width: 100%;
+  }
 }
 
 .segmented-control {

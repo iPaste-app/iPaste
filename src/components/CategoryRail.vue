@@ -38,6 +38,7 @@ const props = defineProps<{
   editingCategoryId: string | null;
   historyCount: number;
   categoryCounts: Record<string, number>;
+  hideCounts?: boolean;
   orientation?: "horizontal" | "vertical";
 }>();
 
@@ -545,7 +546,7 @@ function countLabel(count: number | undefined) {
         tabindex="-1"
         @click="selectCategory('history')"
       >
-        <span class="category-count-dot category-count-dot-history">{{ countLabel(historyCount) }}</span>
+        <span v-if="!hideCounts" class="category-count-dot category-count-dot-history">{{ countLabel(historyCount) }}</span>
         <span class="category-chip-label">{{ t("category.history") }}</span>
       </button>
 
@@ -567,7 +568,7 @@ function countLabel(count: number | undefined) {
         @pointerdown="startCategoryDrag(category, $event)"
       >
         <span
-          v-if="editingCategoryId !== category.id"
+          v-if="!hideCounts && editingCategoryId !== category.id"
           class="category-color-dot category-count-dot"
           :style="{ backgroundColor: category.color }"
         >

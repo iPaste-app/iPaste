@@ -16,7 +16,7 @@
         "title": "iPaste",
         "width": 560,
         "height": 620,
-        "minWidth": 560,
+        "minWidth": 280,
         "maxWidth": 720,
         "minHeight": 500,
         "resizable": true,

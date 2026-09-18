@@ -14,6 +14,8 @@ mod ocr_error;
 mod pinning;
 #[cfg(test)]
 mod pinning_tests;
+#[cfg(test)]
+mod window_size_tests;
 use ocr_error::ImageOcrError;
 
 #[cfg(target_os = "macos")]
@@ -118,7 +120,7 @@ const SCREEN_MARGIN: i32 = 12;
 const MAIN_WINDOW_GEOMETRY: WindowGeometry = WindowGeometry {
     width: 560.0,
     height: 620.0,
-    min_width: 560.0,
+    min_width: 280.0,
     min_height: 500.0,
     max_width: Some(720.0),
     max_height: None,
@@ -126,7 +128,7 @@ const MAIN_WINDOW_GEOMETRY: WindowGeometry = WindowGeometry {
 const SIDE_MAIN_WINDOW_GEOMETRY: WindowGeometry = WindowGeometry {
     width: 720.0,
     height: 620.0,
-    min_width: 700.0,
+    min_width: 280.0,
     min_height: 500.0,
     max_width: Some(720.0),
     max_height: None,
@@ -196,6 +198,22 @@ struct WindowGeometry {
     min_height: f64,
     max_width: Option<f64>,
     max_height: Option<f64>,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+struct MainWindowSize {
+    width: f64,
+    height: f64,
+}
+
+impl MainWindowSize {
+    fn is_valid(self) -> bool {
+        self.width.is_finite()
+            && self.height.is_finite()
+            && self.width >= MAIN_WINDOW_GEOMETRY.min_width
+            && self.width <= MAIN_WINDOW_GEOMETRY.max_width.unwrap_or(f64::MAX)
+            && self.height >= MAIN_WINDOW_GEOMETRY.min_height
+    }
 }
 #[cfg(target_os = "macos")]
 const PASTE_FOCUS_TIMEOUT: Duration = Duration::from_millis(250);
@@ -1213,6 +1231,29 @@ impl Store {
         )
         .optional()
         .map_err(|error| error.to_string())
+    }
+
+    fn main_window_size(&self) -> Result<Option<MainWindowSize>, String> {
+        let conn = self.connect()?;
+        Ok(self
+            .setting_value_with_conn(&conn, "main_window_size")?
+            .and_then(|value| serde_json::from_str::<MainWindowSize>(&value).ok())
+            .filter(|size| size.is_valid()))
+    }
+
+    fn save_main_window_size(&self, size: MainWindowSize) -> Result<(), String> {
+        if !size.is_valid() {
+            return Err("无效的主窗口尺寸".to_string());
+        }
+        let value = serde_json::to_string(&size).map_err(|error| error.to_string())?;
+        self.connect()?
+            .execute(
+                "INSERT INTO settings (key, value) VALUES ('main_window_size', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE value != excluded.value",
+                params![value],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
     }
 
     fn star_prompt_snapshot(&self) -> Result<StarPromptSnapshot, String> {
@@ -2652,13 +2693,21 @@ fn update_panel_open_behavior(
 }
 
 #[tauri::command]
+fn save_main_window_size(
+    state: tauri::State<'_, AppState>,
+    size: MainWindowSize,
+) -> Result<(), String> {
+    state.store.save_main_window_size(size)
+}
+
+#[tauri::command]
 fn update_panel_layout(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     layout: String,
 ) -> Result<AppSettings, String> {
     let settings = state.store.update_panel_layout(layout)?;
-    apply_main_window_layout_geometry(&app, &settings.panel_layout)?;
+    apply_main_window_layout_geometry(&app)?;
     emit_settings_changed(&app, &settings);
     Ok(settings)
 }
@@ -3153,6 +3202,7 @@ pub fn run() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
+            save_main_window_size,
             get_snapshot,
             get_app_settings,
             list_clips,
@@ -3559,10 +3609,20 @@ fn tray_icon() -> Option<tauri::image::Image<'static>> {
 }
 
 fn current_main_window_geometry(app: &tauri::AppHandle) -> WindowGeometry {
-    app.try_state::<AppState>()
-        .and_then(|state| state.store.settings().ok())
+    let Some(state) = app.try_state::<AppState>() else {
+        return MAIN_WINDOW_GEOMETRY;
+    };
+    let mut geometry = state
+        .store
+        .settings()
+        .ok()
         .map(|settings| main_window_geometry_for_layout(&settings.panel_layout))
-        .unwrap_or(MAIN_WINDOW_GEOMETRY)
+        .unwrap_or(MAIN_WINDOW_GEOMETRY);
+    if let Ok(Some(size)) = state.store.main_window_size() {
+        geometry.width = size.width;
+        geometry.height = size.height;
+    }
+    geometry
 }
 
 fn main_window_geometry_for_layout(layout: &str) -> WindowGeometry {
@@ -3573,7 +3633,7 @@ fn main_window_geometry_for_layout(layout: &str) -> WindowGeometry {
     }
 }
 
-fn apply_main_window_layout_geometry(app: &tauri::AppHandle, layout: &str) -> Result<(), String> {
+fn apply_main_window_layout_geometry(app: &tauri::AppHandle) -> Result<(), String> {
     let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
         return Ok(());
     };
@@ -3583,7 +3643,7 @@ fn apply_main_window_layout_geometry(app: &tauri::AppHandle, layout: &str) -> Re
         .or(app.primary_monitor().map_err(|error| error.to_string())?)
         .ok_or_else(|| "未找到可用屏幕".to_string())?;
 
-    apply_window_geometry_for_monitor(&window, &monitor, main_window_geometry_for_layout(layout))?;
+    apply_window_geometry_for_monitor(&window, &monitor, current_main_window_geometry(app))?;
     Ok(())
 }
 
@@ -4725,7 +4785,10 @@ fn apply_window_geometry_for_monitor(
 
     #[cfg(not(target_os = "windows"))]
     window
-        .set_size(tauri::LogicalSize::new(geometry.width, geometry.height))
+        .set_size(tauri::LogicalSize::new(
+            expected_size.0 as f64 / target_scale,
+            expected_size.1 as f64 / target_scale,
+        ))
         .map_err(|error| error.to_string())?;
 
     Ok(expected_size)
