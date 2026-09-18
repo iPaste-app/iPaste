@@ -1344,6 +1344,12 @@ body.ipaste-preserve-current-app .global-tooltip,
   font-weight: 700;
 }
 
+.clip-pin-indicator {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: #0f766e;
+}
+
 .clip-title-type-icon {
   display: grid;
   width: 1rem;
@@ -1682,9 +1688,14 @@ body.ipaste-preserve-current-app .global-tooltip,
     color 120ms ease;
 }
 
-.context-menu-item:hover {
+.context-menu-item:hover:where(:not(:disabled)) {
   background: #eff6ff;
   color: #1d4ed8;
+}
+
+.context-menu-item:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 .context-menu-item-strong {

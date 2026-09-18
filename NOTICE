@@ -3,6 +3,11 @@ Copyright 2026 iPaste Contributors
 
 This product includes software developed by the iPaste Contributors.
 
+The content pin icons use Solar Icons (pin-bold and pin-linear) by 480 Design,
+licensed under CC BY 4.0: https://creativecommons.org/licenses/by/4.0/.
+Source: https://www.figma.com/community/file/1166831539721848736.
+The linear icon's stroke width has been adjusted for this interface.
+
 Windows image OCR uses PaddleOCR model assets and RapidOCR-compatible
 post-processing. PaddleOCR and rapidocr-core are licensed under Apache-2.0.
 

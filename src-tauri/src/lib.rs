@@ -11,6 +11,9 @@ mod windows_ocr;
 #[cfg(target_os = "windows")]
 mod ocr_asset_cache;
 mod ocr_error;
+mod pinning;
+#[cfg(test)]
+mod pinning_tests;
 use ocr_error::ImageOcrError;
 
 #[cfg(target_os = "macos")]
@@ -238,6 +241,8 @@ struct ClipItem {
     last_captured_at: String,
     favorite_count: i64,
     is_pinned: bool,
+    #[serde(default)]
+    pin_order: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -267,6 +272,8 @@ struct CategoryItem {
     updated_at: String,
     sync_state: String,
     is_pinned: bool,
+    #[serde(default)]
+    pin_order: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -827,6 +834,8 @@ impl Store {
             "INTEGER NOT NULL DEFAULT 0",
         )?;
 
+        pinning::migrate(conn)?;
+
         self.migrate_image_data_urls(conn)?;
         self.remove_empty_default_categories(conn)
     }
@@ -1361,7 +1370,7 @@ impl Store {
         let conn = self.connect()?;
         let existing: Option<ClipItem> = conn
             .query_row(
-                "SELECT id, clip_type, content_hash, display_name, preview_text, text, source_app, last_captured_at, favorite_count, is_pinned
+                "SELECT id, clip_type, content_hash, display_name, preview_text, text, source_app, last_captured_at, favorite_count, is_pinned, pin_order
                  FROM clips WHERE content_hash = ?1",
                 params![item.content_hash],
                 map_clip,
@@ -1405,6 +1414,7 @@ impl Store {
             last_captured_at,
             favorite_count: 0,
             is_pinned: false,
+            pin_order: None,
         };
 
         conn.execute(
@@ -1476,6 +1486,7 @@ impl Store {
             last_captured_at: captured_at,
             favorite_count: 0,
             is_pinned: false,
+            pin_order: None,
         };
 
         conn.execute(
@@ -1551,7 +1562,7 @@ impl Store {
         let all_count = self.clip_total_count_with_conn(conn)?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, clip_type, content_hash, display_name, preview_text, text, source_app, last_captured_at, favorite_count, is_pinned
+                "SELECT id, clip_type, content_hash, display_name, preview_text, text, source_app, last_captured_at, favorite_count, is_pinned, pin_order
                  FROM clips
                  WHERE ?3 = ''
                     OR lower(COALESCE(display_name, '')) LIKE ?4
@@ -1559,7 +1570,7 @@ impl Store {
                     OR lower(clip_type) LIKE ?4
                     OR (clip_type != 'image' AND lower(text) LIKE ?4)
                     OR (clip_type = 'image' AND '图片 image' LIKE ?4)
-                 ORDER BY datetime(last_captured_at) DESC LIMIT ?1 OFFSET ?2",
+                 ORDER BY is_pinned DESC, pin_order DESC, julianday(last_captured_at) DESC, id ASC LIMIT ?1 OFFSET ?2",
             )
             .map_err(|error| error.to_string())?;
 
@@ -1645,8 +1656,8 @@ impl Store {
     ) -> Result<Vec<CategoryItem>, String> {
         let mut stmt = conn
             .prepare(
-                "SELECT id, category_id, clip_snapshot_id, clip_type, content_hash, display_name, preview_text, text, sort_order, created_at, updated_at, sync_state, is_pinned
-                 FROM category_items ORDER BY is_pinned DESC, sort_order ASC, datetime(created_at) DESC",
+                "SELECT id, category_id, clip_snapshot_id, clip_type, content_hash, display_name, preview_text, text, sort_order, created_at, updated_at, sync_state, is_pinned, pin_order
+                 FROM category_items ORDER BY category_id ASC, is_pinned DESC, pin_order DESC, sort_order ASC, julianday(created_at) DESC, id ASC",
             )
             .map_err(|error| error.to_string())?;
 
@@ -1695,11 +1706,45 @@ impl Store {
         ensure_unique_ids(&item_ids)?;
         ensure_all_category_items_exist(&tx, &category_id, &item_ids)?;
 
+        let mut stmt = tx
+            .prepare(
+                "SELECT id, is_pinned FROM category_items WHERE category_id = ?1
+                 ORDER BY sort_order ASC, julianday(created_at) DESC, id ASC",
+            )
+            .map_err(|error| error.to_string())?;
+        let baseline = collect_rows(
+            stmt.query_map(params![category_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+            })
+            .map_err(|error| error.to_string())?,
+        )?;
+        drop(stmt);
+        let pin_by_id: std::collections::HashMap<_, _> = baseline.iter().cloned().collect();
+        let mut ordinary_seen = false;
+        for id in &item_ids {
+            if pin_by_id[id] && ordinary_seen {
+                return Err("只能在相同置顶状态的条目之间排序".to_string());
+            }
+            ordinary_seen |= !pin_by_id[id];
+        }
+        let mut ordinary = item_ids.iter().filter(|id| !pin_by_id[*id]);
+        let pinned: Vec<_> = item_ids.iter().filter(|id| pin_by_id[*id]).collect();
+        let pin_ranks: std::collections::HashMap<_, _> = pinned
+            .iter()
+            .enumerate()
+            .map(|(index, id)| ((*id).clone(), (pinned.len() - index) as i64))
+            .collect();
         let updated_at = now();
-        for (index, id) in item_ids.iter().enumerate() {
+        for (index, (original_id, is_pinned)) in baseline.iter().enumerate() {
+            let id = if *is_pinned {
+                original_id
+            } else {
+                ordinary.next()
+                    .ok_or_else(|| "无效的分类条目顺序".to_string())?
+            };
             tx.execute(
-                "UPDATE category_items SET sort_order = ?1, sync_state = 'local', updated_at = ?2 WHERE id = ?3 AND category_id = ?4",
-                params![index as i64, updated_at, id, category_id],
+                "UPDATE category_items SET sort_order = ?1, sync_state = 'local', updated_at = ?2, pin_order = ?5 WHERE id = ?3 AND category_id = ?4",
+                params![index as i64, updated_at, id, category_id, pin_ranks.get(id)],
             )
             .map_err(|error| error.to_string())?;
         }
@@ -1716,7 +1761,7 @@ impl Store {
     ) -> Result<Vec<CategoryItem>, String> {
         let mut stmt = conn
             .prepare(
-                "SELECT id, category_id, clip_snapshot_id, clip_type, content_hash, display_name, preview_text, text, sort_order, created_at, updated_at, sync_state, is_pinned
+                "SELECT id, category_id, clip_snapshot_id, clip_type, content_hash, display_name, preview_text, text, sort_order, created_at, updated_at, sync_state, is_pinned, pin_order
                  FROM category_items
                  WHERE clip_type IN ('text', 'link', 'color', 'html')
                  ORDER BY sort_order ASC, datetime(created_at) DESC",
@@ -1866,7 +1911,7 @@ impl Store {
     ) -> Result<CategoryItem, String> {
         let clip: ClipItem = conn
             .query_row(
-                "SELECT id, clip_type, content_hash, display_name, preview_text, text, source_app, last_captured_at, favorite_count, is_pinned
+                "SELECT id, clip_type, content_hash, display_name, preview_text, text, source_app, last_captured_at, favorite_count, is_pinned, pin_order
                  FROM clips WHERE id = ?1",
                 params![clip_id],
                 map_clip,
@@ -1886,7 +1931,7 @@ impl Store {
 
         if let Some(existing) = conn
             .query_row(
-                "SELECT id, category_id, clip_snapshot_id, clip_type, content_hash, display_name, preview_text, text, sort_order, created_at, updated_at, sync_state, is_pinned
+                "SELECT id, category_id, clip_snapshot_id, clip_type, content_hash, display_name, preview_text, text, sort_order, created_at, updated_at, sync_state, is_pinned, pin_order
                  FROM category_items WHERE category_id = ?1 AND content_hash = ?2",
                 params![category_id, clip.content_hash],
                 map_category_item,
@@ -1919,6 +1964,7 @@ impl Store {
             updated_at: now,
             sync_state: "local".to_string(),
             is_pinned: false,
+            pin_order: None,
         };
 
         conn.execute(
@@ -2019,12 +2065,13 @@ impl Store {
                     let last_captured_at = now();
                     let display_name = existing.display_name.clone().or(current.display_name);
                     let is_pinned = existing.is_pinned || current.is_pinned;
+                    let pin_order = existing.pin_order.max(current.pin_order);
                     let favorite_count = existing.favorite_count + current.favorite_count;
                     tx.execute(
                         "UPDATE clips
-                         SET display_name = ?1, favorite_count = ?2, is_pinned = ?3, last_captured_at = ?4
+                         SET display_name = ?1, favorite_count = ?2, is_pinned = ?3, last_captured_at = ?4, pin_order = ?6
                          WHERE id = ?5",
-                        params![display_name, favorite_count, is_pinned, last_captured_at, existing_id],
+                        params![display_name, favorite_count, is_pinned, last_captured_at, existing_id, pin_order],
                     )
                     .map_err(|error| error.to_string())?;
                     tx.execute(
@@ -2089,7 +2136,11 @@ impl Store {
         match collection.as_str() {
             "history" => {
                 conn.execute(
-                    "UPDATE clips SET is_pinned = ?1 WHERE id = ?2",
+                    "UPDATE clips SET is_pinned = ?1,
+                        pin_order = CASE WHEN ?1 = 0 THEN NULL
+                            WHEN is_pinned = 1 AND pin_order IS NOT NULL THEN pin_order
+                            ELSE (SELECT COALESCE(MAX(pin_order), 0) + 1 FROM clips WHERE is_pinned = 1) END
+                     WHERE id = ?2",
                     params![is_pinned, id],
                 )
                 .map_err(|error| error.to_string())?;
@@ -2097,7 +2148,12 @@ impl Store {
             }
             "category" => {
                 conn.execute(
-                    "UPDATE category_items SET is_pinned = ?1, updated_at = ?2 WHERE id = ?3",
+                    "UPDATE category_items SET is_pinned = ?1, sync_state = 'local', updated_at = ?2,
+                        pin_order = CASE WHEN ?1 = 0 THEN NULL
+                            WHEN is_pinned = 1 AND pin_order IS NOT NULL THEN pin_order
+                            ELSE (SELECT COALESCE(MAX(peer.pin_order), 0) + 1 FROM category_items peer
+                                  WHERE peer.category_id = category_items.category_id AND peer.is_pinned = 1) END
+                     WHERE id = ?3",
                     params![is_pinned, now(), id],
                 )
                 .map_err(|error| error.to_string())?;
@@ -2110,7 +2166,7 @@ impl Store {
 
     fn get_clip_with_conn(&self, conn: &Connection, id: &str) -> Result<ClipItem, String> {
         conn.query_row(
-            "SELECT id, clip_type, content_hash, display_name, preview_text, text, source_app, last_captured_at, favorite_count, is_pinned
+            "SELECT id, clip_type, content_hash, display_name, preview_text, text, source_app, last_captured_at, favorite_count, is_pinned, pin_order
              FROM clips WHERE id = ?1",
             params![id],
             map_clip,
@@ -2127,7 +2183,7 @@ impl Store {
         exclude_id: Option<&str>,
     ) -> Result<Option<ClipItem>, String> {
         conn.query_row(
-            "SELECT id, clip_type, content_hash, display_name, preview_text, text, source_app, last_captured_at, favorite_count, is_pinned
+            "SELECT id, clip_type, content_hash, display_name, preview_text, text, source_app, last_captured_at, favorite_count, is_pinned, pin_order
              FROM clips
              WHERE content_hash = ?1 AND (?2 IS NULL OR id != ?2)",
             params![content_hash, exclude_id],
@@ -2143,7 +2199,7 @@ impl Store {
         id: &str,
     ) -> Result<CategoryItem, String> {
         conn.query_row(
-            "SELECT id, category_id, clip_snapshot_id, clip_type, content_hash, display_name, preview_text, text, sort_order, created_at, updated_at, sync_state, is_pinned
+            "SELECT id, category_id, clip_snapshot_id, clip_type, content_hash, display_name, preview_text, text, sort_order, created_at, updated_at, sync_state, is_pinned, pin_order
              FROM category_items WHERE id = ?1",
             params![id],
             map_category_item,
@@ -2161,7 +2217,7 @@ impl Store {
         exclude_id: Option<&str>,
     ) -> Result<Option<CategoryItem>, String> {
         conn.query_row(
-            "SELECT id, category_id, clip_snapshot_id, clip_type, content_hash, display_name, preview_text, text, sort_order, created_at, updated_at, sync_state, is_pinned
+            "SELECT id, category_id, clip_snapshot_id, clip_type, content_hash, display_name, preview_text, text, sort_order, created_at, updated_at, sync_state, is_pinned, pin_order
              FROM category_items
              WHERE category_id = ?1 AND content_hash = ?2 AND (?3 IS NULL OR id != ?3)",
             params![category_id, content_hash, exclude_id],
@@ -2234,7 +2290,7 @@ impl Store {
                    color = excluded.color,
                    sort_order = excluded.sort_order,
                    updated_at = excluded.updated_at
-                 WHERE datetime(excluded.updated_at) >= datetime(categories.updated_at)",
+                 WHERE julianday(excluded.updated_at) >= julianday(categories.updated_at)",
                 params![
                     category.id,
                     category.name,
@@ -2253,8 +2309,8 @@ impl Store {
             }
 
             conn.execute(
-                "INSERT INTO category_items (id, category_id, clip_snapshot_id, clip_type, content_hash, display_name, preview_text, text, sort_order, created_at, updated_at, sync_state, is_pinned)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'synced', ?12)
+                "INSERT INTO category_items (id, category_id, clip_snapshot_id, clip_type, content_hash, display_name, preview_text, text, sort_order, created_at, updated_at, sync_state, is_pinned, pin_order)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'synced', ?12, ?13)
                  ON CONFLICT(id) DO UPDATE SET
                    category_id = excluded.category_id,
                    clip_snapshot_id = excluded.clip_snapshot_id,
@@ -2266,8 +2322,10 @@ impl Store {
                    sort_order = excluded.sort_order,
                    updated_at = excluded.updated_at,
                    sync_state = 'synced',
-                   is_pinned = excluded.is_pinned
-                 WHERE datetime(excluded.updated_at) >= datetime(category_items.updated_at)",
+                   is_pinned = excluded.is_pinned,
+                   pin_order = CASE WHEN excluded.is_pinned = 0 THEN NULL
+                                    ELSE COALESCE(excluded.pin_order, category_items.pin_order) END
+                 WHERE julianday(excluded.updated_at) >= julianday(category_items.updated_at)",
                 params![
                     item.id,
                     item.category_id,
@@ -2281,18 +2339,11 @@ impl Store {
                     item.created_at,
                     item.updated_at,
                     item.is_pinned,
+                    item.pin_order,
                 ],
             )
             .map_err(|error| error.to_string())?;
         }
-
-        conn.execute(
-            "UPDATE category_items
-             SET sync_state = 'synced'
-             WHERE clip_type IN ('text', 'link', 'color', 'html')",
-            [],
-        )
-        .map_err(|error| error.to_string())?;
 
         Ok(())
     }
@@ -6545,7 +6596,8 @@ fn safe_filename(value: &str) -> String {
 }
 
 fn now() -> String {
-    Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
+    // Preserve the order of local edits and sync responses within the same second.
+    Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
 fn new_id() -> String {
@@ -6604,6 +6656,7 @@ fn map_clip(row: &rusqlite::Row<'_>) -> rusqlite::Result<ClipItem> {
         last_captured_at: row.get(7)?,
         favorite_count: row.get(8)?,
         is_pinned: row.get(9)?,
+        pin_order: row.get(10)?,
     })
 }
 
@@ -6633,5 +6686,6 @@ fn map_category_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<CategoryItem> 
         updated_at: row.get(10)?,
         sync_state: row.get(11)?,
         is_pinned: row.get(12)?,
+        pin_order: row.get(13)?,
     })
 }

@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { cleanLanguage, setLanguage } from "../i18n";
 import { ipasteApi } from "../lib/ipasteApi";
+import { categoryOrderByIds, compareCategoryItemOrder, compareClipOrder } from "../lib/clipOrder";
 import type {
   AppendCopyChangedEvent,
   CapturedEvent,
@@ -42,6 +43,8 @@ export const useIpasteStore = defineStore("ipaste", () => {
   const isAppendCopyEnabled = ref(false);
   const isLoading = ref(false);
   const isLoadingMoreClips = ref(false);
+  const isUpdatingPin = ref(false);
+  const isReorderingCategoryItems = ref(false);
   const hasMoreClips = ref(false);
   const clipTotalCount = ref(0);
   const visibleHistoryTotalCount = ref(0);
@@ -62,6 +65,8 @@ export const useIpasteStore = defineStore("ipaste", () => {
   let clipRequestId = 0;
   let loadedClipSearch = "";
   let isReloadingClips = false;
+  let historyRevision = 0;
+  let historyNeedsReload = false;
 
   const activeCategory = computed(() =>
     categories.value.find((category) => category.id === selectedCategoryId.value),
@@ -70,10 +75,11 @@ export const useIpasteStore = defineStore("ipaste", () => {
   // Keep card objects stable while typing; only rebuild them when their source changes.
   const sourceItems = computed<ClipViewItem[]>(() => {
     if (selectedCategoryId.value === "history") {
-      return clips.value.map((clip) => ({ ...clip, collection: "history" as const }));
+      return [...clips.value].sort(compareClipOrder).map((clip) => ({ ...clip, collection: "history" as const }));
     }
     return categoryItems.value
       .filter((item) => item.categoryId === selectedCategoryId.value)
+      .sort(compareCategoryItemOrder)
       .map((item) => ({ ...item, collection: "category" as const }));
   });
 
@@ -162,6 +168,9 @@ export const useIpasteStore = defineStore("ipaste", () => {
       patchItem(event.payload.collection, event.payload.item);
       if (event.payload.collection === "category") {
         syncCloudInBackground();
+      } else {
+        historyRevision += 1;
+        void reloadClips({ preserveSelection: true, minCount: clips.value.length });
       }
     });
 
@@ -190,14 +199,23 @@ export const useIpasteStore = defineStore("ipaste", () => {
 
   async function loadMoreClips() {
     if (selectedCategoryId.value !== "history" || isLoadingMoreClips.value || !hasMoreClips.value) return;
-    if (isReloadingClips || search.value !== loadedClipSearch) return;
+    if (isReloadingClips || isUpdatingPin.value || search.value !== loadedClipSearch) return;
+    if (historyNeedsReload) {
+      await reloadClips({ preserveSelection: true, minCount: clips.value.length + CLIP_PAGE_SIZE });
+      return;
+    }
 
     const requestId = clipRequestId;
+    const revision = historyRevision;
     const query = search.value;
     isLoadingMoreClips.value = true;
     try {
       const page = await ipasteApi.listClips(clips.value.length, CLIP_PAGE_SIZE, query);
       if (requestId !== clipRequestId || query !== search.value) return;
+      if (revision !== historyRevision) {
+        await reloadClips({ preserveSelection: true, minCount: clips.value.length + CLIP_PAGE_SIZE });
+        return;
+      }
       const existingIds = new Set(clips.value.map((clip) => clip.id));
       clips.value = [
         ...clips.value,
@@ -216,22 +234,45 @@ export const useIpasteStore = defineStore("ipaste", () => {
     }
   }
 
-  async function reloadClips() {
+  async function reloadClips(options: { preserveSelection?: boolean; minCount?: number } = {}) {
     const requestId = ++clipRequestId;
     const query = search.value;
+    const selection = options.preserveSelection && selectedCategoryId.value === "history"
+      ? selectedItem.value : undefined;
+    const minCount = Math.max(CLIP_PAGE_SIZE, options.minCount ?? CLIP_PAGE_SIZE);
     isReloadingClips = true;
     isLoadingMoreClips.value = false;
+    historyNeedsReload = true;
+    const isCurrent = () => requestId === clipRequestId && query === search.value;
 
     try {
-      const page = await ipasteApi.listClips(0, CLIP_PAGE_SIZE, query);
-      if (requestId !== clipRequestId || query !== search.value) return;
+      // Read a contiguous prefix, including the selected item after an unpin.
+      // Restart if a capture changes offsets while the pages are in flight.
+      while (isCurrent()) {
+        const revision = historyRevision;
+        let page = await ipasteApi.listClips(0, Math.min(100, minCount), query);
+        if (!isCurrent()) return;
+        const items = [...page.clips];
+        while (revision === historyRevision && page.hasMore && page.clips.length > 0
+          && ((options.minCount !== undefined && items.length < minCount)
+            || (selection && !items.some((item) => item.id === selection.id)))) {
+          page = await ipasteApi.listClips(items.length, 100, query);
+          if (!isCurrent()) return;
+          items.push(...page.clips);
+        }
+        if (revision !== historyRevision) continue;
 
-      clips.value = page.clips;
-      loadedClipSearch = query;
-      hasMoreClips.value = page.hasMore;
-      visibleHistoryTotalCount.value = page.totalCount;
-      clipTotalCount.value = page.allCount;
-      selectedIndex.value = 0;
+        const currentSelection = selectedItem.value;
+        clips.value = items.sort(compareClipOrder);
+        loadedClipSearch = query;
+        hasMoreClips.value = page.hasMore;
+        visibleHistoryTotalCount.value = page.totalCount;
+        clipTotalCount.value = page.allCount;
+        historyNeedsReload = false;
+        if (options.preserveSelection) restoreSelection(currentSelection);
+        else if (selectedCategoryId.value === "history") selectedIndex.value = 0;
+        return;
+      }
     } catch (unknownError) {
       if (requestId === clipRequestId && query === search.value) {
         error.value = String(unknownError);
@@ -299,6 +340,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
 
   async function deleteClip(id: string) {
     await ipasteApi.deleteClip(id);
+    historyRevision += 1;
     const hadClip = clips.value.some((clip) => clip.id === id);
     clips.value = clips.value.filter((clip) => clip.id !== id);
     if (hadClip) {
@@ -313,6 +355,34 @@ export const useIpasteStore = defineStore("ipaste", () => {
     patchItem(item.collection, next);
     if (item.collection === "category") {
       syncCloudInBackground();
+    }
+  }
+
+  async function togglePinned(item: ClipViewItem) {
+    if (isUpdatingPin.value || isReorderingCategoryItems.value) return;
+    const source = item.collection === "history" ? clips.value : categoryItems.value;
+    const current = source.find((entry) => entry.id === item.id);
+    if (!current) return;
+    isUpdatingPin.value = true;
+    error.value = null;
+    if (item.collection === "history") {
+      clipRequestId += 1;
+      isReloadingClips = false;
+      isLoadingMoreClips.value = false;
+    }
+    try {
+      const next = await ipasteApi.setClipPinned(item.id, item.collection, !current.isPinned);
+      patchItem(item.collection, next);
+      if (item.collection === "history") {
+        historyRevision += 1;
+        await reloadClips({ preserveSelection: true, minCount: clips.value.length });
+      } else {
+        syncCloudInBackground();
+      }
+    } catch (unknownError) {
+      error.value = String(unknownError);
+    } finally {
+      isUpdatingPin.value = false;
     }
   }
 
@@ -333,13 +403,19 @@ export const useIpasteStore = defineStore("ipaste", () => {
   }
 
   async function reorderCategoryItems(categoryId: string, itemIds: string[]) {
+    if (isUpdatingPin.value || isReorderingCategoryItems.value) return;
     const targetItems = categoryItems.value.filter((item) => item.categoryId === categoryId);
-    if (itemIds.length !== targetItems.length) return;
+    const ordered = categoryOrderByIds(targetItems, itemIds);
+    if (!ordered) return;
 
     const previous = categoryItems.value;
     const selectedItemId = selectedItem.value?.collection === "category" ? selectedItem.value.id : null;
-    categoryItems.value = orderCategoryItemsByIds(previous, categoryId, itemIds);
+    categoryItems.value = [
+      ...previous.filter((item) => item.categoryId !== categoryId),
+      ...ordered,
+    ].sort(compareCategoryItemOrder);
     restoreCategorySelection(selectedItemId);
+    isReorderingCategoryItems.value = true;
 
     try {
       categoryItems.value = await ipasteApi.reorderCategoryItems(categoryId, itemIds);
@@ -350,6 +426,8 @@ export const useIpasteStore = defineStore("ipaste", () => {
       restoreCategorySelection(selectedItemId);
       error.value = String(unknownError);
       throw unknownError;
+    } finally {
+      isReorderingCategoryItems.value = false;
     }
   }
 
@@ -644,12 +722,20 @@ export const useIpasteStore = defineStore("ipaste", () => {
   }
 
   function upsertClip(clip: ClipItem, totalCount?: number, wasInserted = false) {
+    historyRevision += 1;
+    const selection = selectedItem.value;
     const hadClip = clips.value.some((item) => item.id === clip.id);
     const hasSearch = Boolean(search.value.trim());
     const matchesCurrentSearch = clipMatchesSearch(clip, search.value);
 
     if (!hasSearch || matchesCurrentSearch) {
-      clips.value = [clip, ...clips.value.filter((item) => item.id !== clip.id)].slice(0, 120);
+      const ordered = [...clips.value].sort(compareClipOrder);
+      const last = ordered[ordered.length - 1];
+      // Do not append a normal capture after a partially loaded pinned group:
+      // records in the next page may still precede it.
+      if (hadClip || !hasMoreClips.value || (last && compareClipOrder(clip, last) < 0)) {
+        clips.value = [clip, ...ordered.filter((item) => item.id !== clip.id)].sort(compareClipOrder);
+      }
     }
 
     if (typeof totalCount === "number") {
@@ -666,26 +752,27 @@ export const useIpasteStore = defineStore("ipaste", () => {
     if (!hasSearch) {
       hasMoreClips.value = hasMoreClips.value || clips.value.length >= CLIP_PAGE_SIZE;
     }
-    if (selectedCategoryId.value === "history") {
-      selectedIndex.value = 0;
-    }
+    restoreSelection(selection);
   }
 
   function patchItem(collection: "history" | "category", item: ClipItem | CategoryItem) {
+    const selection = selectedItem.value;
     if (collection === "history") {
       const clip = item as ClipItem;
       const hasClip = clips.value.some((entry) => entry.id === clip.id);
       if (hasClip) {
-        clips.value = clips.value.map((entry) => (entry.id === clip.id ? clip : entry));
+        clips.value = clips.value.map((entry) => (entry.id === clip.id ? clip : entry)).sort(compareClipOrder);
       } else if (clipMatchesSearch(clip, search.value)) {
-        clips.value = [clip, ...clips.value].slice(0, 120);
+        clips.value = [clip, ...clips.value].sort(compareClipOrder);
       }
+      restoreSelection(selection);
       return;
     }
 
     categoryItems.value = categoryItems.value.map((categoryItem) =>
       categoryItem.id === item.id ? (item as CategoryItem) : categoryItem,
-    );
+    ).sort(compareCategoryItemOrder);
+    restoreSelection(selection);
   }
 
   function originalClipId(item: ClipViewItem) {
@@ -714,28 +801,19 @@ export const useIpasteStore = defineStore("ipaste", () => {
       .filter((item): item is Category => Boolean(item));
   }
 
-  function orderCategoryItemsByIds(items: CategoryItem[], categoryId: string, ids: string[]) {
-    const byId = new Map(items.filter((item) => item.categoryId === categoryId).map((item) => [item.id, item]));
-    const reordered = ids
-      .map((id, index) => {
-        const item = byId.get(id);
-        return item ? { ...item, sortOrder: index } : null;
-      })
-      .filter((item): item is CategoryItem => Boolean(item));
-    return [
-      ...items.filter((item) => item.categoryId !== categoryId),
-      ...reordered,
-    ].sort(compareCategoryItemOrder);
-  }
-
   function compareSortOrder(left: Category, right: Category) {
     return left.sortOrder - right.sortOrder || left.createdAt.localeCompare(right.createdAt);
   }
 
-  function compareCategoryItemOrder(left: CategoryItem, right: CategoryItem) {
-    if (left.categoryId !== right.categoryId) return left.categoryId.localeCompare(right.categoryId);
-    if (left.isPinned !== right.isPinned) return left.isPinned ? -1 : 1;
-    return left.sortOrder - right.sortOrder || right.createdAt.localeCompare(left.createdAt);
+  function restoreSelection(item: ClipViewItem | undefined) {
+    if (item) {
+      const index = visibleItems.value.findIndex((entry) => entry.collection === item.collection && entry.id === item.id);
+      if (index >= 0) {
+        selectedIndex.value = index;
+        return;
+      }
+    }
+    clampSelection();
   }
 
   function restoreCategorySelection(itemId: string | null) {
@@ -765,6 +843,8 @@ export const useIpasteStore = defineStore("ipaste", () => {
     isAppendCopyEnabled,
     isLoading,
     isLoadingMoreClips,
+    isUpdatingPin,
+    isReorderingCategoryItems,
     hasMoreClips,
     clipTotalCount,
     visibleHistoryTotalCount,
@@ -795,6 +875,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
     removeCategoryItem,
     deleteClip,
     renameClip,
+    togglePinned,
     updateClipContent,
     applySelected,
     applyItem,

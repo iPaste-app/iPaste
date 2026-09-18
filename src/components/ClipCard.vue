@@ -8,6 +8,7 @@ import {
   Type,
 } from "lucide-vue-next";
 import { computed } from "vue";
+import ContentPinIcon from "./ContentPinIcon.vue";
 import { clipImageSrc } from "../lib/clipMedia";
 import { t } from "../i18n";
 import { categoryDisplayName, clipMetricText, formatTime, typeLabel } from "../lib/format";
@@ -159,6 +160,15 @@ function resetImagePreview(event: PointerEvent) {
             <component :is="iconComponent" v-else class="clip-title-type-icon-svg" />
           </button>
           <span class="clip-card-title min-w-0 truncate text-xs">{{ headerLabel }}</span>
+          <span
+            v-if="item.isPinned"
+            class="clip-pin-indicator"
+            role="img"
+            :aria-label="t('clip.pinned')"
+            :data-tooltip="t('clip.pinned')"
+          >
+            <ContentPinIcon filled class="size-3.5" />
+          </span>
           <span class="size-1 rounded-full bg-slate-300" />
           <span class="truncate text-xs text-slate-400">{{ formatTime(displayTime) }}</span>
         </div>

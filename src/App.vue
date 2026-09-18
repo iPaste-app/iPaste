@@ -5,6 +5,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { AlertCircle, CheckCircle2, ChevronRight, ClipboardCopy, CornerDownLeft, FolderInput, Inbox, Pencil, Plus, Trash2, X } from "lucide-vue-next";
 import CategoryRail from "./components/CategoryRail.vue";
 import ClipCard from "./components/ClipCard.vue";
+import ContentPinIcon from "./components/ContentPinIcon.vue";
 import ClipViewerWindow from "./components/ClipViewerWindow.vue";
 import SettingsWindow from "./components/SettingsWindow.vue";
 import StarPrompt from "./components/StarPrompt.vue";
@@ -60,6 +61,7 @@ const isTauri = "__TAURI_INTERNALS__" in window;
 let itemDragState: {
   key: string;
   id: string;
+  isPinned: boolean;
   startX: number;
   startY: number;
   width: number;
@@ -113,7 +115,8 @@ const categoryItemCounts = computed(() =>
 const formattedShortcut = computed(() => `${formatShortcut("CommandOrControl+F")} ${t("shortcut.search")}`);
 const isSideLayout = computed(() => store.panelLayout === "side");
 const canReorderVisibleItems = computed(() =>
-  store.selectedCategoryId !== "history" && !store.search.trim() && store.visibleItems.length > 1,
+  store.selectedCategoryId !== "history" && !store.search.trim()
+    && !store.isUpdatingPin && !store.isReorderingCategoryItems && store.visibleItems.length > 1,
 );
 const quickPreviewItem = computed(() => {
   if (!isQuickPreviewActive.value || contextMenu.value || editingClipKey.value) return null;
@@ -458,6 +461,15 @@ async function addContextItemToCategory(categoryId: string) {
   await addItemToCategory(item, categoryId);
 }
 
+async function toggleContextItemPinned() {
+  const item = contextMenu.value?.item;
+  if (!item || store.isUpdatingPin || store.isReorderingCategoryItems) return;
+  closeFloatingLayers();
+  cancelItemDrag();
+  await store.togglePinned(item);
+  scheduleSelectedClipScroll();
+}
+
 async function addItemToCategory(item: ClipViewItem, categoryId: string) {
   const clipId = item.collection === "history" ? item.id : item.clipSnapshotId;
   await store.addToCategory(clipId, categoryId);
@@ -479,6 +491,7 @@ function startItemDrag(payload: { item: ClipViewItem; index: number; event: Poin
   itemDragState = {
     key,
     id: payload.item.id,
+    isPinned: payload.item.isPinned,
     startX: payload.event.clientX,
     startY: payload.event.clientY,
     width: rect?.width ?? 0,
@@ -513,7 +526,8 @@ function handleItemPointerMove(event: PointerEvent) {
   };
 
   const target = itemTargetFromPoint(event.clientX, event.clientY);
-  if (!target || target.key === state.key) {
+  const targetItem = store.visibleItems.find((item) => item.id === target?.id);
+  if (!target || target.key === state.key || targetItem?.isPinned !== state.isPinned) {
     state.targetKey = null;
     state.targetId = null;
     state.side = null;
@@ -546,7 +560,8 @@ async function finishItemDrag(event?: PointerEvent) {
   if (!state?.hasMoved || !state.targetKey || !state.targetId || !state.side || state.key === state.targetKey) return;
   const currentItems = store.visibleItems.filter((item) => item.collection === "category");
   const draggedItem = currentItems.find((item) => contextItemKey(item) === state.key);
-  if (!draggedItem) return;
+  const targetItem = currentItems.find((item) => item.id === state.targetId);
+  if (!draggedItem || !targetItem || draggedItem.isPinned !== targetItem.isPinned) return;
 
   const nextIds = currentItems
     .filter((item) => contextItemKey(item) !== state.key)
@@ -1418,6 +1433,17 @@ function scrollSelectedClipIntoView() {
         <span>{{ t("common.copy") }}</span>
       </button>
       <div class="context-menu-separator" />
+      <button
+        type="button"
+        class="context-menu-item"
+        tabindex="-1"
+        role="menuitem"
+        :disabled="store.isUpdatingPin || store.isReorderingCategoryItems"
+        @click="toggleContextItemPinned"
+      >
+        <ContentPinIcon :filled="contextMenu.item.isPinned" class="size-4" />
+        <span>{{ t(contextMenu.item.isPinned ? "context.unpin" : "context.pin") }}</span>
+      </button>
       <button type="button" class="context-menu-item" tabindex="-1" role="menuitem" @click="renameContextItem">
         <Pencil class="size-4" />
         <span>{{ t("common.rename") }}</span>

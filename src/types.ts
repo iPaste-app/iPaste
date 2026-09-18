@@ -11,6 +11,7 @@ export type ClipItem = {
   lastCapturedAt: string;
   favoriteCount: number;
   isPinned: boolean;
+  pinOrder?: number | null;
 };
 
 export type Category = {
@@ -36,6 +37,7 @@ export type CategoryItem = {
   updatedAt: string;
   syncState: "local" | "syncing" | "synced" | "conflict";
   isPinned: boolean;
+  pinOrder?: number | null;
 };
 
 export type CategoryWithItem = {

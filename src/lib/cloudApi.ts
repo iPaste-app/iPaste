@@ -31,6 +31,8 @@ export type CloudCategoryItemInput = {
   previewText?: string;
   text: string;
   sortOrder?: number;
+  isPinned?: boolean;
+  pinOrder?: number | null;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -152,6 +154,8 @@ export async function prepareCategoryItemInput(input: CloudCategoryItemInput) {
     previewText: input.previewText?.trim() || previewText(text),
     text,
     ...(input.sortOrder === undefined ? {} : { sortOrder: input.sortOrder }),
+    ...(input.isPinned === undefined ? {} : { isPinned: input.isPinned }),
+    ...(input.pinOrder === undefined ? {} : { pinOrder: input.pinOrder }),
     createdAt: input.createdAt ?? timestamp,
     updatedAt: input.updatedAt ?? timestamp,
   };

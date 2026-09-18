@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import appPackage from "../../package.json";
+import { categoryOrderByIds, compareCategoryItemOrder, compareClipOrder } from "./clipOrder";
 import type {
   AppInfo,
   AppSettings,
@@ -163,7 +164,11 @@ export const ipasteApi = {
     return call<AppSettings>("get_app_settings", undefined, mockSnapshot.settings);
   },
   snapshot() {
-    return call<AppSnapshot>("get_snapshot", undefined, mockSnapshot);
+    return call<AppSnapshot>("get_snapshot", undefined, {
+      ...mockSnapshot,
+      clips: [...mockClips].sort(compareClipOrder),
+      categoryItems: [...mockCategoryItems].sort(compareCategoryItemOrder),
+    });
   },
   listClips(offset = 0, limit = 20, search = "") {
     const query = search.trim().toLowerCase();
@@ -178,7 +183,7 @@ export const ipasteApi = {
         )
       : mockClips;
     return call<ClipPage>("list_clips", { offset, limit, search }, {
-      clips: source.slice(offset, offset + limit),
+      clips: [...source].sort(compareClipOrder).slice(offset, offset + limit),
       hasMore: offset + limit < source.length,
       totalCount: source.length,
       allCount: mockClips.length,
@@ -206,14 +211,12 @@ export const ipasteApi = {
   reorderCategoryItems(categoryId: string, itemIds: string[]) {
     if (!isTauri) {
       const timestamp = new Date().toISOString();
-      const ordered = itemIds
-        .map((id, index) => {
-          const item = mockCategoryItems.find((entry) => entry.id === id && entry.categoryId === categoryId);
-          return item ? { ...item, sortOrder: index, updatedAt: timestamp } : null;
-        })
-        .filter((item): item is CategoryItem => Boolean(item));
+      const ordered = categoryOrderByIds(mockCategoryItems.filter((item) => item.categoryId === categoryId), itemIds);
+      if (!ordered) return Promise.reject(new Error("Invalid category item order"));
       const otherItems = mockCategoryItems.filter((item) => item.categoryId !== categoryId);
-      mockCategoryItems.splice(0, mockCategoryItems.length, ...otherItems, ...ordered);
+      mockCategoryItems.splice(0, mockCategoryItems.length, ...otherItems,
+        ...ordered.map((item) => ({ ...item, updatedAt: timestamp })));
+      mockCategoryItems.sort(compareCategoryItemOrder);
       return Promise.resolve(structuredClone(mockCategoryItems));
     }
     return invoke<CategoryItem[]>("reorder_category_items", { categoryId, itemIds });
@@ -305,6 +308,22 @@ export const ipasteApi = {
   },
   deleteClip(id: string) {
     return call<void>("delete_clip", { id });
+  },
+  async setClipPinned(id: string, collection: "history" | "category", isPinned: boolean) {
+    if (isTauri) return invoke<ClipItem | CategoryItem>("set_clip_pinned", { id, collection, isPinned });
+    const source = collection === "history" ? mockClips : mockCategoryItems;
+    const item = source.find((entry) => entry.id === id);
+    if (!item) throw new Error("Clipboard item not found");
+    if (item.isPinned === isPinned) return structuredClone(item);
+    const peers = source.filter((entry) => !("categoryId" in item)
+      || ("categoryId" in entry && entry.categoryId === item.categoryId));
+    item.pinOrder = isPinned ? Math.max(0, ...peers.map((entry) => entry.pinOrder ?? 0)) + 1 : null;
+    item.isPinned = isPinned;
+    if ("categoryId" in item) {
+      item.updatedAt = new Date().toISOString();
+      item.syncState = "local";
+    }
+    return structuredClone(item);
   },
   renameClip(id: string, collection: "history" | "category", displayName: string | null) {
     const normalizedName = displayName?.trim() || null;

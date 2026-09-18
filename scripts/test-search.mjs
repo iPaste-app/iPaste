@@ -5,19 +5,26 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { runInThisContext } from "node:vm";
 
-globalThis.window = {};
-globalThis.__searchTest = { requests: [] };
+globalThis.window = { __TAURI_INTERNALS__: {}, setTimeout, clearTimeout };
+globalThis.__searchTest = { requests: [], pinRequests: [], reorderRequests: [], listeners: new Map(), syncCount: 0 };
 const stubs = {
   api: `export const ipasteApi = { listClips(...args) {
     return new Promise((resolve, reject) => globalThis.__searchTest.requests.push({args, resolve, reject}));
-  } };`,
+  }, setClipPinned(...args) {
+    return new Promise((resolve, reject) => globalThis.__searchTest.pinRequests.push({args, resolve, reject}));
+  }, reorderCategoryItems(...args) {
+    return new Promise((resolve, reject) => globalThis.__searchTest.reorderRequests.push({args, resolve, reject}));
+  }, async syncCloudInBackground() { globalThis.__searchTest.syncCount += 1; } };`,
   i18n: `import {ref} from 'vue'; export const currentLocale = ref('en');
     export const t = (key, args) => args ? key + ':' + JSON.stringify(args) : key;
     export const cleanLanguage = value => value; export const setLanguage = () => {};`,
-  event: `export const listen = async () => () => {};`,
+  event: `export const listen = async (name, callback) => {
+    globalThis.__searchTest.listeners.set(name, callback);
+    return () => globalThis.__searchTest.listeners.delete(name);
+  };`,
 };
 const result = await build({
-  entryPoints: ["tests/search.test.ts"], bundle: true, write: false,
+  entryPoints: [process.argv[2] ?? "tests/search.test.ts"], bundle: true, write: false,
   platform: "node", format: "cjs",
   define: {"import.meta.url": JSON.stringify(new URL("../src/components/TopBar.vue", import.meta.url).href)},
   plugins: [{ name: "search-test", setup(builder) {
