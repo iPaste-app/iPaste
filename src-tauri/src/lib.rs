@@ -4555,6 +4555,10 @@ fn show_settings_window(app: &tauri::AppHandle, tab: Option<&str>) -> Result<(),
         .map_err(|error| error.to_string())?
     };
 
+    if let Some(icon) = tray_icon() {
+        window.set_icon(icon).map_err(|error| error.to_string())?;
+    }
+
     if let Some(monitor) = &main_monitor {
         position_window_centered_on_monitor(&window, &monitor, SETTINGS_WINDOW_GEOMETRY)?;
     } else {

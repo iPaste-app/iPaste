@@ -48,6 +48,7 @@ import {
 import { useIpasteStore } from "../stores/ipasteStore";
 import type { AppInfo, Language, PanelLayout, PanelOpenBehavior } from "../types";
 
+const logoUrl = new URL("../../src-tauri/icons/tray-icon@2x.png", import.meta.url).href;
 const store = useIpasteStore();
 const DEFAULT_SHORTCUT = "CommandOrControl+Shift+V";
 type SettingsTab = "general" | "shortcuts" | "ocr" | "dataManagement" | "permissions" | "about";
@@ -811,9 +812,7 @@ async function updateLanguage(language: Language) {
         <div v-else-if="activeTab === 'about'" class="settings-section">
           <section class="settings-panel settings-about-panel">
             <header class="about-identity">
-              <div class="about-identity-icon">
-                <Sparkles class="size-5" />
-              </div>
+              <img class="about-identity-icon" :src="logoUrl" alt="" />
               <div class="about-identity-copy">
                 <div class="about-identity-heading">
                   <h2>iPaste</h2>

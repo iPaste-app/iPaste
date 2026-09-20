@@ -97,8 +97,8 @@ input:focus-visible {
 }
 
 .top-bar-logo {
-  width: 1.75rem;
-  height: 1.75rem;
+  width: 1.5rem;
+  height: 1.5rem;
   flex: 0 0 auto;
   border-radius: 0.5rem;
   object-fit: contain;
@@ -2485,14 +2485,11 @@ body.ipaste-preserve-current-app .global-tooltip,
 }
 
 .about-identity-icon {
-  display: grid;
+  display: block;
   width: 2.5rem;
   height: 2.5rem;
   flex: 0 0 auto;
-  place-items: center;
-  border-radius: 0.75rem;
-  background: #ede9fe;
-  color: #6d28d9;
+  object-fit: contain;
 }
 
 .about-identity-copy {
