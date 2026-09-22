@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { generateTotp, parseOtpAuthUri, secondsRemaining } from "../src/lib/mfa";
+import { filterMfaAccounts } from "../src/lib/mfaList";
+import type { MfaAccount } from "../src/types";
 import { shortcutsEqual } from "../src/lib/shortcuts";
 import { en } from "../src/i18n/locales/en";
 import { zhCN } from "../src/i18n/locales/zh-CN";
@@ -15,6 +17,19 @@ function base32(value: string) {
   const bits = [...Buffer.from(value)].map(byte => byte.toString(2).padStart(8, "0")).join("");
   return bits.match(/.{1,5}/g)!.map(chunk => alphabet[parseInt(chunk.padEnd(5, "0"), 2)]).join("");
 }
+
+test("MFA search combines issuer, account and notes without searching secrets", () => {
+  const accounts = [
+    { id: "a", issuer: "GitHub", name: "alice@example.com", description: "Work", secret: "PRIVATESECRET", sourceUri: "otpauth://private" },
+    { id: "b", issuer: "GitHub", name: "bob@example.com", description: "Personal" },
+  ] as MfaAccount[];
+  assert.deepEqual(filterMfaAccounts(accounts, "  GITHUB alice WORK ").map(item => item.id), ["a"]);
+  assert.deepEqual(filterMfaAccounts(accounts, "personal").map(item => item.id), ["b"]);
+  assert.deepEqual(filterMfaAccounts(accounts, "missing"), []);
+  assert.deepEqual(filterMfaAccounts(accounts, "PRIVATESECRET"), []);
+  assert.deepEqual(filterMfaAccounts(accounts, "otpauth"), []);
+  assert.equal(filterMfaAccounts(accounts, "  "), accounts);
+});
 
 test("shortcut comparison resolves native aliases without conflating Control and Command", () => {
   assert.ok(shortcutsEqual("CommandOrControl+Shift+A", "Shift+Command+A", true));

@@ -717,38 +717,12 @@ body.ipaste-preserve-current-app .global-tooltip,
   padding: 0.625rem 1rem;
 }
 
-.mfa-toolbar-leading {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 0.625rem;
-}
-
 .mfa-manager-editing .mfa-toolbar {
   min-height: 3rem;
   padding-block: 0.5rem;
 }
 
-.mfa-toolbar-copy {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 0.625rem;
-}
-
-.mfa-toolbar-icon {
-  display: grid;
-  width: 2rem;
-  height: 2rem;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid #ccfbf1;
-  border-radius: 0.5rem;
-  background: #f0fdfa;
-  color: #0f766e;
-}
-
-.mfa-toolbar h2,
+.mfa-app-title,
 .mfa-editor-header h3,
 .mfa-empty h3 {
   margin: 0;
@@ -758,11 +732,52 @@ body.ipaste-preserve-current-app .global-tooltip,
   line-height: 1.25;
 }
 
-.mfa-toolbar-kicker {
-  margin: 0.125rem 0 0;
+.mfa-app-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
+
+.mfa-account-count {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: #64748b;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.mfa-list-footer {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.375rem 1rem;
+  border-top: 1px solid #e2e8f0;
+  padding: 0.5rem 1rem;
   color: #64748b;
   font-size: 0.6875rem;
-  font-weight: 650;
+}
+
+.mfa-list-shortcuts {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem 1rem;
+}
+
+.mfa-list-shortcuts span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.mfa-list-shortcuts kbd {
+  border: 1px solid #e2e8f0;
+  border-radius: 0.25rem;
+  padding: 0.0625rem 0.25rem;
+  background: #fff;
+  font: inherit;
 }
 
 .mfa-primary-button,
@@ -915,6 +930,8 @@ body.ipaste-preserve-current-app .global-tooltip,
 }
 
 .mfa-account-list {
+  container: mfa-list / inline-size;
+  padding: 3px;
   overflow-x: hidden;
   overflow-y: auto;
 }
@@ -922,306 +939,9 @@ body.ipaste-preserve-current-app .global-tooltip,
 .mfa-account-stack,
 .mfa-loading-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--mfa-columns, 2), minmax(0, 1fr));
   align-content: start;
   gap: 0.5rem;
-}
-
-.mfa-account-row {
-  position: relative;
-  display: flex;
-  min-width: 0;
-  min-height: 7.5rem;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: space-between;
-  gap: 0.75rem;
-  border: 1px solid #dbe3ee;
-  border-radius: 0.5rem;
-  background: rgba(255, 255, 255, 0.96);
-  padding: 0.625rem;
-  cursor: context-menu;
-  transition:
-    border-color 140ms ease,
-    background-color 140ms ease,
-    box-shadow 140ms ease;
-}
-
-.mfa-account-row:hover {
-  border-color: #b6e9e2;
-  background: #ffffff;
-  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
-}
-
-.mfa-account-row:focus-visible {
-  outline: 2px solid #14b8a6;
-  outline-offset: 2px;
-}
-
-.mfa-account-row-menu-open {
-  border-color: #0f766e;
-  box-shadow:
-    0 0 0 1px rgba(15, 118, 110, 0.18),
-    0 10px 24px rgba(15, 23, 42, 0.08);
-}
-
-.mfa-account-identity {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 0.625rem;
-}
-
-.mfa-account-avatar {
-  display: grid;
-  width: 2.25rem;
-  height: 2.25rem;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid #ccfbf1;
-  border-radius: 0.5rem;
-  background: #f0fdfa;
-  color: #0f766e;
-}
-
-.mfa-account-main {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.mfa-account-title-line {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.mfa-account-title-line strong {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  color: #0f172a;
-  font-size: 0.9375rem;
-  font-weight: 750;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mfa-account-title-line span {
-  flex: 0 1 auto;
-  max-width: 48%;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #f1f5f9;
-  padding: 0.1875rem 0.4375rem;
-  color: #475569;
-  font-size: 0.6875rem;
-  font-weight: 700;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mfa-account-main p {
-  overflow: hidden;
-  margin: 0;
-  color: #64748b;
-  font-size: 0.75rem;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mfa-account-controls {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: stretch;
-  gap: 0.375rem;
-}
-
-.mfa-code-shell {
-  display: grid;
-  width: auto;
-  min-width: 0;
-  min-height: 2.75rem;
-  flex: 1 1 auto;
-  grid-template-columns: 1.75rem minmax(0, 1fr) 2rem;
-  align-items: center;
-  gap: 0.375rem;
-  border: 1px solid #cbd5e1;
-  border-radius: 0.5rem;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(240, 249, 255, 0.9)),
-    #ffffff;
-  padding: 0.3125rem 0.375rem;
-  color: #0f172a;
-  cursor: pointer;
-  font-variant-numeric: tabular-nums;
-  transition:
-    background-color 140ms ease,
-    border-color 140ms ease,
-    box-shadow 140ms ease;
-}
-
-.mfa-code-shell:hover {
-  border-color: #5eead4;
-  background: #f0fdfa;
-  box-shadow: inset 0 0 0 1px rgba(20, 184, 166, 0.12);
-}
-
-.mfa-code-shell:focus-visible {
-  outline: 2px solid #14b8a6;
-  outline-offset: 2px;
-}
-
-.mfa-code-shell-error {
-  border-color: #fecaca;
-  background: #fef2f2;
-}
-
-.mfa-code-shell-copied {
-  border-color: #5eead4;
-  background: #ecfdf5;
-  color: #115e59;
-}
-
-.mfa-code-action-icon {
-  justify-self: center;
-  color: #0f766e;
-}
-
-.mfa-code-copy-button {
-  display: grid;
-  width: 1.75rem;
-  height: 1.75rem;
-  place-items: center;
-  border: 1px solid #ccfbf1;
-  border-radius: 0.4375rem;
-  background: #f0fdfa;
-  color: #0f766e;
-  transition:
-    background-color 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease;
-}
-
-.mfa-code-copy-button:hover {
-  border-color: #5eead4;
-  background: #ccfbf1;
-  color: #115e59;
-}
-
-.mfa-code-value {
-  min-width: 0;
-  overflow: hidden;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 1.0625rem;
-  font-weight: 850;
-  letter-spacing: 0;
-  line-height: 1.1;
-  text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mfa-paste-button {
-  display: inline-flex;
-  height: 2.75rem;
-  align-items: center;
-  justify-content: center;
-  gap: 0.3125rem;
-  border: 1px solid #dbe3ee;
-  border-radius: 0.5rem;
-  background: #ffffff;
-  width: 2.75rem;
-  flex: 0 0 auto;
-  padding: 0;
-  color: #334155;
-  font-size: 0.75rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition:
-    border-color 140ms ease,
-    background-color 140ms ease,
-    color 140ms ease;
-}
-
-.mfa-paste-button span {
-  display: none;
-}
-
-.mfa-paste-button:hover {
-  border-color: #99f6e4;
-  background: #f0fdfa;
-  color: #0f766e;
-}
-
-.mfa-more-button {
-  width: 2.25rem;
-  height: 2.75rem;
-}
-
-.mfa-code-timer {
-  --mfa-timer-accent: #0f766e;
-  --mfa-timer-track: #ccfbf1;
-  --mfa-timer-inner-ring: rgba(15, 118, 110, 0.1);
-  position: relative;
-  display: grid;
-  width: 2rem;
-  height: 2rem;
-  place-items: center;
-  border-radius: 999px;
-  background: conic-gradient(var(--mfa-timer-accent) var(--mfa-progress), var(--mfa-timer-track) 0);
-  color: var(--mfa-timer-accent);
-}
-
-.mfa-code-timer::before {
-  position: absolute;
-  inset: 0.1875rem;
-  border-radius: inherit;
-  background: #ffffff;
-  box-shadow: inset 0 0 0 1px var(--mfa-timer-inner-ring);
-  content: "";
-}
-
-.mfa-code-timer-safe {
-  --mfa-timer-accent: #0f766e;
-  --mfa-timer-track: #ccfbf1;
-  --mfa-timer-inner-ring: rgba(15, 118, 110, 0.1);
-}
-
-.mfa-code-timer-warning {
-  --mfa-timer-accent: #b7791f;
-  --mfa-timer-track: #fef3c7;
-  --mfa-timer-inner-ring: rgba(180, 83, 9, 0.12);
-}
-
-.mfa-code-timer-danger {
-  --mfa-timer-accent: #be3455;
-  --mfa-timer-track: #ffe4e6;
-  --mfa-timer-inner-ring: rgba(190, 52, 85, 0.12);
-}
-
-.mfa-code-timer span {
-  position: relative;
-  font-size: 0.625rem;
-  font-weight: 850;
-  line-height: 1;
-}
-
-.mfa-code-error {
-  justify-self: end;
-  border-radius: 999px;
-  background: #fee2e2;
-  padding: 0.25rem 0.4375rem;
-  color: #b91c1c;
-  font-size: 0.6875rem;
-  font-weight: 800;
-  line-height: 1;
-  white-space: nowrap;
 }
 
 .mfa-context-menu {
@@ -1265,6 +985,7 @@ body.ipaste-preserve-current-app .global-tooltip,
 
 .mfa-editor-header {
   display: flex;
+  flex-shrink: 0;
   min-height: 4rem;
   align-items: center;
   justify-content: space-between;
@@ -1470,16 +1191,11 @@ body.ipaste-preserve-current-app .global-tooltip,
 }
 
 .mfa-form-actions {
-  position: sticky;
-  z-index: 2;
-  bottom: -1rem;
+  flex: 0 0 auto;
   justify-content: flex-end;
-  border: 1px solid #e2e8f0;
-  border-radius: 0.5rem;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 -8px 20px rgba(15, 23, 42, 0.04);
-  padding: 0.625rem;
-  backdrop-filter: blur(12px);
+  border-top: 1px solid #e2e8f0;
+  background: #ffffff;
+  padding: 0.625rem 1rem;
 }
 
 .mfa-advanced {
@@ -1618,53 +1334,6 @@ body.ipaste-preserve-current-app .global-tooltip,
     padding: 0.625rem 0.75rem;
   }
 
-  .mfa-account-stack,
-  .mfa-loading-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.5rem;
-  }
-
-  .mfa-account-row {
-    min-height: 7.5rem;
-    gap: 0.625rem;
-    padding: 0.625rem;
-  }
-
-  .mfa-account-controls {
-    justify-content: stretch;
-  }
-
-  .mfa-code-shell {
-    width: auto;
-    flex: 1 1 auto;
-    min-height: 3.125rem;
-    grid-template-columns: 1.625rem minmax(0, 1fr) 1.875rem;
-    gap: 0.4375rem;
-    padding: 0.4375rem;
-  }
-
-  .mfa-code-copy-button {
-    width: 1.625rem;
-    height: 1.625rem;
-  }
-
-  .mfa-code-value {
-    font-size: 1rem;
-  }
-
-  .mfa-code-timer {
-    width: 1.875rem;
-    height: 1.875rem;
-  }
-
-  .mfa-paste-button {
-    height: 3.125rem;
-  }
-
-  .mfa-more-button {
-    height: 3.125rem;
-  }
-
   .mfa-form,
   .mfa-editor-header {
     padding-inline: 0.75rem;
@@ -1691,15 +1360,6 @@ body.ipaste-preserve-current-app .global-tooltip,
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .mfa-account-stack,
-  .mfa-loading-list {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .mfa-paste-button span {
-    display: none;
-  }
-
   .mfa-field-grid-compact {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1711,32 +1371,11 @@ body.ipaste-preserve-current-app .global-tooltip,
     padding-inline: 0.75rem;
   }
 
-  .mfa-toolbar-icon {
-    display: none;
-  }
-
-  .mfa-toolbar h2 {
-    font-size: 0.875rem;
-  }
-
   .mfa-primary-button {
     flex-shrink: 0;
     padding-inline: 0.5rem;
   }
 
-  .mfa-code-shell {
-    grid-template-columns: minmax(0, 1fr) 1.875rem;
-    gap: 0.375rem;
-  }
-
-  .mfa-code-action-icon {
-    display: none;
-  }
-
-  .mfa-code-value {
-    font-size: 0.9375rem;
-    letter-spacing: 0.03em;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3394,7 +3033,6 @@ body.ipaste-preserve-current-app .global-tooltip,
   font-size: 0.8125rem;
   line-height: 1.55;
 }
-
 
 .settings-icon-button {
   display: inline-grid;

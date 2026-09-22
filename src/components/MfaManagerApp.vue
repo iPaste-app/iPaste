@@ -7,7 +7,6 @@ import {
   CornerDownLeft,
   History,
   KeyRound,
-  MoreHorizontal,
   Pencil,
   Plus,
   QrCode,
@@ -19,6 +18,10 @@ import {
   X,
 } from "lucide-vue-next";
 import { t } from "../i18n";
+import MfaAccountRow from "./MfaAccountRow.vue";
+import { useElementWidth } from "../composables/useElementWidth";
+import { clipColumnCount, selectionDelta } from "../lib/panelLayout";
+import { filterMfaAccounts } from "../lib/mfaList";
 import { ipasteApi } from "../lib/ipasteApi";
 import {
   generateTotp,
@@ -29,12 +32,12 @@ import {
   normalizeMfaPeriod,
   normalizeMfaSecret,
   parseOtpAuthUri,
-  secondsRemaining,
 } from "../lib/mfa";
 import { decodeQrFromClip, decodeQrFromFile } from "../lib/qr";
 import { useIpasteStore } from "../stores/ipasteStore";
 import type { ClipItem, MfaAccount, MfaAccountInput, MfaAlgorithm } from "../types";
 
+const props = withDefaults(defineProps<{ search?: string }>(), { search: "" });
 const emit = defineEmits<{
   back: [];
 }>();
@@ -88,13 +91,23 @@ const codeById = ref<Record<string, string>>({});
 const codeErrorById = ref<Record<string, string>>({});
 const nowMs = ref(Date.now());
 const pendingDeleteId = ref<string | null>(null);
-const copiedAccountId = ref<string | null>(null);
 const accountContextMenu = ref<AccountContextMenu | null>(null);
 const accountContextMenuElement = ref<HTMLElement | null>(null);
+const accountListElement = ref<HTMLElement | null>(null);
+const listWidth = useElementWidth(accountListElement);
+const columnCount = computed(() => clipColumnCount(listWidth.value));
+const selectedAccountId = ref<string | null>(null);
+const codeActionPending = ref(false);
+const visibleAccounts = computed(() => filterMfaAccounts(accounts.value, props.search));
+watch(visibleAccounts, (items) => {
+  if (!items.some((account) => account.id === selectedAccountId.value)) {
+    selectedAccountId.value = items[0]?.id ?? null;
+  }
+});
+watch(() => props.search, dismissAccountContextMenu);
 let accountContextMenuReturnFocus: HTMLElement | null = null;
 let codeTimer: number | null = null;
 let codeRefreshId = 0;
-let copiedTimer: number | null = null;
 let noticeTimer: number | null = null;
 let errorTimer: number | null = null;
 
@@ -140,7 +153,6 @@ onUnmounted(() => {
     window.clearInterval(codeTimer);
     codeTimer = null;
   }
-  if (copiedTimer !== null) window.clearTimeout(copiedTimer);
   if (noticeTimer !== null) window.clearTimeout(noticeTimer);
   if (errorTimer !== null) window.clearTimeout(errorTimer);
 });
@@ -190,26 +202,8 @@ async function refreshCodes() {
   codeErrorById.value = nextErrors;
 }
 
-function remainingFor(account: MfaAccount) {
-  return secondsRemaining(account.period, nowMs.value);
-}
-
-function progressFor(account: MfaAccount) {
-  return Math.max(0, Math.min(1, remainingFor(account) / account.period));
-}
-
-function progressPercentFor(account: MfaAccount) {
-  return `${Math.round(progressFor(account) * 100)}%`;
-}
-
-function timerStageFor(account: MfaAccount) {
-  const ratio = progressFor(account);
-  if (ratio <= 1 / 3) return "danger";
-  if (ratio <= 2 / 3) return "warning";
-  return "safe";
-}
-
 function openAccountContextMenu(account: MfaAccount, event: MouseEvent) {
+  selectedAccountId.value = account.id;
   pendingDeleteId.value = null;
   accountContextMenuReturnFocus = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
   accountContextMenu.value = {
@@ -218,27 +212,6 @@ function openAccountContextMenu(account: MfaAccount, event: MouseEvent) {
     y: event.clientY,
   };
   void nextTick(positionAccountContextMenu);
-}
-
-function toggleAccountContextMenu(account: MfaAccount, event: MouseEvent) {
-  if (accountContextMenu.value?.account.id === account.id) {
-    closeAccountContextMenu();
-    return;
-  }
-
-  const trigger = event.currentTarget as HTMLElement;
-  const rect = trigger.getBoundingClientRect();
-  pendingDeleteId.value = null;
-  accountContextMenuReturnFocus = trigger;
-  accountContextMenu.value = {
-    account,
-    x: rect.right - 160,
-    y: rect.bottom + 4,
-  };
-  void nextTick(() => {
-    positionAccountContextMenu();
-    accountContextMenuElement.value?.querySelector<HTMLElement>("[role='menuitem']")?.focus();
-  });
 }
 
 function positionAccountContextMenu() {
@@ -268,6 +241,8 @@ function dismissAccountContextMenu() {
 }
 
 function handleDocumentKeydown(event: KeyboardEvent) {
+  if (event.isComposing || event.keyCode === 229) return;
+  if (!formOpen.value && !accountContextMenu.value) handleListKeydown(event);
   if (event.key !== "Escape") return;
 
   if (accountContextMenu.value) {
@@ -283,6 +258,68 @@ function handleDocumentKeydown(event: KeyboardEvent) {
     cancelForm();
   }
 }
+
+function handleListKeydown(event: KeyboardEvent) {
+  if (event.defaultPrevented || !visibleAccounts.value.length) return;
+  const target = event.target instanceof HTMLElement ? event.target : null;
+  if (document.querySelector("[aria-modal='true']")) return;
+  if (target && target !== document.body && !target.closest(".mfa-manager, .search-box")) return;
+  const inSearch = Boolean(target?.closest(".search-box"));
+  if (target?.closest("input, textarea, select, [contenteditable='true']") && !inSearch) return;
+  const index = visibleAccounts.value.findIndex((account) => account.id === selectedAccountId.value);
+  const delta = selectionDelta(event.key, columnCount.value);
+  if (inSearch && (event.key === "ArrowLeft" || event.key === "ArrowRight")) return;
+  if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && delta !== null) {
+    event.preventDefault();
+    moveSelection(inSearch ? 0 : delta);
+    return;
+  }
+  const account = visibleAccounts.value[index];
+  if (!account || event.repeat || event.altKey || event.shiftKey) return;
+  if (event.key === "Enter" && !event.ctrlKey && !event.metaKey && !target?.closest("button")) {
+    event.preventDefault();
+    void pasteAccountCodeFromCard(account);
+  } else if (!inSearch && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") {
+    if (window.getSelection()?.toString()) return;
+    event.preventDefault();
+    void copyAccountCodeFromCard(account);
+  }
+}
+
+function moveSelection(delta: number) {
+  if (!visibleAccounts.value.length) return;
+  const index = visibleAccounts.value.findIndex((account) => account.id === selectedAccountId.value);
+  selectedAccountId.value = visibleAccounts.value[clamp(index + delta, 0, visibleAccounts.value.length - 1)].id;
+  void nextTick(() => {
+    const row = accountListElement.value?.querySelector<HTMLElement>(".mfa-account-row.is-selected");
+    row?.focus({ preventScroll: true });
+    row?.scrollIntoView({ block: "nearest" });
+  });
+}
+
+// macOS forwards these keys while the panel leaves the destination app active.
+function handleNativePanelKey(key: string): boolean {
+  if (key === "Escape") {
+    if (accountContextMenu.value) closeAccountContextMenu({ restoreFocus: true });
+    else if (formOpen.value) cancelForm();
+    else return false;
+    return true;
+  }
+  if (formOpen.value || accountContextMenu.value) return true;
+  const delta = selectionDelta(key, columnCount.value);
+  if (delta !== null) {
+    moveSelection(delta);
+    return true;
+  }
+  if (key === "Enter") {
+    const account = visibleAccounts.value.find((item) => item.id === selectedAccountId.value);
+    if (account) void pasteAccountCodeFromCard(account);
+    return true;
+  }
+  return false;
+}
+
+defineExpose({ handleNativePanelKey });
 
 function handleAccountMenuKeydown(event: KeyboardEvent) {
   if (!accountContextMenuElement.value) return;
@@ -305,14 +342,14 @@ async function copyAccountFromContext() {
   const account = accountContextMenu.value?.account;
   closeAccountContextMenu();
   if (!account) return;
-  await copyAccountCode(account);
+  await runCodeAction(account, "copy");
 }
 
 async function pasteAccountFromContext() {
   const account = accountContextMenu.value?.account;
   closeAccountContextMenu();
   if (!account) return;
-  await pasteAccountCode(account);
+  await runCodeAction(account, "paste");
 }
 
 function editAccountFromContext() {
@@ -375,6 +412,11 @@ function cancelForm() {
   Object.assign(draft, emptyDraft());
 }
 
+function goBack() {
+  if (formOpen.value) cancelForm();
+  else emit("back");
+}
+
 async function saveDraft() {
   const parsed = parseOtpAuthUri(draft.secret) ?? parseOtpAuthUri(draft.sourceUri);
   const input: MfaAccountInput = parsed
@@ -430,17 +472,12 @@ async function copyAccountCode(account: MfaAccount) {
   const code = await codeFor(account);
   await ipasteApi.copyTextEphemeral(code);
   await touchAccount(account.id);
-  copiedAccountId.value = account.id;
-  if (copiedTimer !== null) window.clearTimeout(copiedTimer);
-  copiedTimer = window.setTimeout(() => {
-    if (copiedAccountId.value === account.id) copiedAccountId.value = null;
-  }, 1600);
   notice.value = t("apps.mfa.copied");
 }
 
 async function copyAccountCodeFromCard(account: MfaAccount) {
   closeAccountContextMenu();
-  await copyAccountCode(account);
+  await runCodeAction(account, "copy");
 }
 
 async function pasteAccountCode(account: MfaAccount) {
@@ -451,7 +488,21 @@ async function pasteAccountCode(account: MfaAccount) {
 
 async function pasteAccountCodeFromCard(account: MfaAccount) {
   closeAccountContextMenu();
-  await pasteAccountCode(account);
+  await runCodeAction(account, "paste");
+}
+
+async function runCodeAction(account: MfaAccount, action: "copy" | "paste") {
+  if (codeActionPending.value || codeErrorById.value[account.id]) return;
+  selectedAccountId.value = account.id;
+  codeActionPending.value = true;
+  try {
+    if (action === "copy") await copyAccountCode(account);
+    else await pasteAccountCode(account);
+  } catch (unknownError) {
+    error.value = String(unknownError);
+  } finally {
+    codeActionPending.value = false;
+  }
 }
 
 async function codeFor(account: MfaAccount) {
@@ -633,26 +684,16 @@ function emptyDraft(): MfaDraft {
 <template>
   <section class="mfa-manager" :class="{ 'mfa-manager-editing': formOpen }" @click="dismissAccountContextMenu">
     <header class="mfa-toolbar">
-      <div class="mfa-toolbar-leading">
-        <button
-          type="button"
-          class="app-center-back-button"
-          :aria-label="t('appCenter.back')"
-          :data-tooltip="t('appCenter.back')"
-          @click.stop="emit('back')"
-        >
-          <ChevronLeft class="size-4" />
-        </button>
-        <div class="mfa-toolbar-copy">
-          <span class="mfa-toolbar-icon" aria-hidden="true">
-            <ShieldCheck class="size-4" />
-          </span>
-          <div class="min-w-0">
-            <h2>{{ t("apps.mfa.managerTitle") }}</h2>
-            <p class="mfa-toolbar-kicker">{{ accountCountLabel }}</p>
-          </div>
-        </div>
-      </div>
+      <button
+        type="button"
+        class="app-center-back-button"
+        :aria-label="formOpen ? t('apps.mfa.backToList') : t('appCenter.back')"
+        :data-tooltip="formOpen ? t('apps.mfa.backToList') : t('appCenter.back')"
+        @click.stop="goBack"
+      >
+        <ChevronLeft class="size-4" />
+      </button>
+      <h2 class="mfa-app-title">{{ t("apps.mfa.name") }}</h2>
       <button v-if="!formOpen" type="button" class="mfa-primary-button" @click="startCreate">
         <Plus class="size-4" />
         <span>{{ t("apps.mfa.add") }}</span>
@@ -678,83 +719,36 @@ function emptyDraft(): MfaDraft {
     <div v-else-if="notice" class="mfa-message" role="status" aria-live="polite">{{ notice }}</div>
 
     <div class="mfa-layout" :class="{ 'mfa-layout-editing': formOpen }">
-      <section v-if="!formOpen" class="mfa-account-list subtle-scrollbar" :aria-label="t('apps.mfa.listLabel')">
+      <section
+        v-if="!formOpen"
+        ref="accountListElement"
+        class="mfa-account-list subtle-scrollbar"
+        :style="{ '--mfa-columns': columnCount }"
+        :aria-label="t('apps.mfa.listLabel')"
+      >
         <div v-if="isLoading" class="mfa-loading-list">
           <div v-for="index in 4" :key="index" class="mfa-loading-row" />
         </div>
 
-        <div v-else-if="accounts.length" class="mfa-account-stack">
-          <article
-            v-for="account in accounts"
+        <div v-else-if="visibleAccounts.length" class="mfa-account-stack">
+          <MfaAccountRow
+            v-for="account in visibleAccounts"
             :key="account.id"
-            class="mfa-account-row"
-            :class="{ 'mfa-account-row-menu-open': accountContextMenu?.account.id === account.id }"
-            @contextmenu.prevent.stop="openAccountContextMenu(account, $event)"
-          >
-            <div class="mfa-account-identity">
-              <span class="mfa-account-avatar" aria-hidden="true">
-                <ShieldCheck class="size-4" />
-              </span>
-              <div class="mfa-account-main">
-                <div class="mfa-account-title-line">
-                  <strong>{{ account.name }}</strong>
-                  <span v-if="account.issuer">{{ account.issuer }}</span>
-                </div>
-                <p v-if="account.description">{{ account.description }}</p>
-              </div>
-            </div>
+            :account="account"
+            :code="codeById[account.id] || ''"
+            :now-ms="nowMs"
+            :selected="selectedAccountId === account.id"
+            :busy="codeActionPending"
+            :invalid="Boolean(codeErrorById[account.id])"
+            :menu-open="accountContextMenu?.account.id === account.id"
+            @select="selectedAccountId = account.id"
+            @paste="pasteAccountCodeFromCard(account)"
+            @context-menu="openAccountContextMenu(account, $event)"
+          />
+        </div>
 
-            <div class="mfa-account-controls">
-              <button
-                type="button"
-                class="mfa-code-shell"
-                :class="{
-                  'mfa-code-shell-error': codeErrorById[account.id],
-                  'mfa-code-shell-copied': copiedAccountId === account.id,
-                }"
-                :style="{ '--mfa-progress': progressPercentFor(account) }"
-                :aria-label="t('common.copy')"
-                :data-tooltip="t('common.copy')"
-                @click.stop="copyAccountCodeFromCard(account)"
-              >
-                <Check v-if="copiedAccountId === account.id" class="mfa-code-action-icon size-3.5" />
-                <ClipboardCopy v-else class="mfa-code-action-icon size-3.5" />
-                <span class="mfa-code-value">{{ codeById[account.id] || "------" }}</span>
-                <span
-                  v-if="!codeErrorById[account.id]"
-                  class="mfa-code-timer"
-                  :class="`mfa-code-timer-${timerStageFor(account)}`"
-                  aria-hidden="true"
-                >
-                  <span>{{ remainingFor(account) }}</span>
-                </span>
-                <span v-else class="mfa-code-error">{{ t("apps.mfa.codeError") }}</span>
-              </button>
-
-              <button
-                type="button"
-                class="mfa-paste-button"
-                :aria-label="t('apps.mfa.pasteCode')"
-                :data-tooltip="t('apps.mfa.pasteCode')"
-                @click.stop="pasteAccountCodeFromCard(account)"
-              >
-                <CornerDownLeft class="size-3.5" />
-                <span>{{ t("common.paste") }}</span>
-              </button>
-
-              <button
-                type="button"
-                class="mfa-icon-button mfa-more-button"
-                :aria-label="t('apps.mfa.moreActions')"
-                :aria-expanded="accountContextMenu?.account.id === account.id"
-                aria-haspopup="menu"
-                :data-tooltip="t('apps.mfa.moreActions')"
-                @click.stop="toggleAccountContextMenu(account, $event)"
-              >
-                <MoreHorizontal class="size-4" />
-              </button>
-            </div>
-          </article>
+        <div v-else-if="accounts.length" class="mfa-empty" role="status">
+          <p>{{ t('apps.mfa.noMatches') }}</p>
         </div>
 
         <div v-else class="mfa-empty">
@@ -774,13 +768,10 @@ function emptyDraft(): MfaDraft {
             <h3>{{ editingId ? t("apps.mfa.editTitle") : t("apps.mfa.createTitle") }}</h3>
             <p>{{ t("apps.mfa.createDescription") }}</p>
           </div>
-          <button v-if="formOpen" type="button" class="mfa-icon-button" :aria-label="t('common.close')" @click="cancelForm">
-            <X class="size-4" />
-          </button>
         </header>
 
         <div class="mfa-editor-body subtle-scrollbar">
-          <form class="mfa-form" @submit.prevent="saveDraft">
+          <form id="mfa-account-form" class="mfa-form" @submit.prevent="saveDraft">
             <section class="mfa-form-section">
               <header class="mfa-form-section-header">
                 <ShieldCheck class="size-4" />
@@ -900,17 +891,24 @@ function emptyDraft(): MfaDraft {
                 </div>
               </div>
             </details>
-
-            <footer class="mfa-form-actions">
-              <button type="button" class="mfa-secondary-button" @click="cancelForm">{{ t("common.cancel") }}</button>
-              <button type="submit" class="mfa-primary-button" :disabled="saveDisabled">
-                <span>{{ isSaving ? t("common.saving") : t("common.save") }}</span>
-              </button>
-            </footer>
           </form>
         </div>
+        <footer class="mfa-form-actions">
+          <button type="submit" form="mfa-account-form" class="mfa-primary-button" :disabled="saveDisabled">
+            <span>{{ isSaving ? t("common.saving") : t("common.save") }}</span>
+          </button>
+        </footer>
       </aside>
     </div>
+
+    <footer v-if="!formOpen" class="mfa-list-footer">
+      <div v-if="visibleAccounts.length" class="mfa-list-shortcuts">
+        <span><kbd>↑ ↓ ← →</kbd> {{ t('apps.mfa.selectAccount') }}</span>
+        <span><kbd>Enter</kbd> {{ t('common.paste') }}</span>
+        <span>{{ t('apps.mfa.doubleClickPaste') }}</span>
+      </div>
+      <span class="mfa-account-count">{{ accountCountLabel }}</span>
+    </footer>
 
     <div
       v-if="accountContextMenu"

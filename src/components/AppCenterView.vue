@@ -5,16 +5,28 @@ import { builtinApps, type AppDefinition, type BuiltinAppId } from "../lib/appCe
 import { t } from "../i18n";
 import MfaManagerApp from "./MfaManagerApp.vue";
 
+const props = withDefaults(defineProps<{ search?: string }>(), { search: "" });
+const emit = defineEmits<{ clearSearch: [] }>();
 const activeAppId = ref<BuiltinAppId | null>(null);
+const mfaManager = ref<InstanceType<typeof MfaManagerApp> | null>(null);
 const activeApp = computed(() => builtinApps.find((app) => app.id === activeAppId.value) ?? null);
+const visibleApps = computed(() => builtinApps.filter((app) =>
+  `${t(app.nameKey)} ${t(app.descriptionKey)}`.toLocaleLowerCase().includes(props.search.trim().toLocaleLowerCase()),
+));
 
 function openApp(app: AppDefinition) {
+  emit("clearSearch");
   activeAppId.value = app.id;
 }
 
 function closeApp() {
+  emit("clearSearch");
   activeAppId.value = null;
 }
+
+defineExpose({
+  handleNativePanelKey: (key: string) => mfaManager.value?.handleNativePanelKey(key) ?? false,
+});
 </script>
 
 <template>
@@ -29,7 +41,7 @@ function closeApp() {
 
       <div class="app-center-grid">
         <button
-          v-for="app in builtinApps"
+          v-for="app in visibleApps"
           :key="app.id"
           type="button"
           class="app-card"
@@ -50,10 +62,11 @@ function closeApp() {
           </span>
         </button>
       </div>
+      <div v-if="!visibleApps.length" class="mfa-empty" role="status">{{ t('apps.mfa.noMatches') }}</div>
     </template>
 
     <template v-else>
-      <MfaManagerApp v-if="activeApp.id === 'mfa-manager'" @back="closeApp" />
+      <MfaManagerApp v-if="activeApp.id === 'mfa-manager'" ref="mfaManager" :search="search" @back="closeApp" />
     </template>
   </section>
 </template>

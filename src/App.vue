@@ -55,6 +55,16 @@ const isQuickPreviewKeyDown = ref(false);
 const isQuickPreviewActive = ref(false);
 const quickPreviewSelectedText = ref("");
 const isAppCenterOpen = ref(false);
+const appCenterElement = ref<InstanceType<typeof AppCenterView> | null>(null);
+const appCenterSearch = ref("");
+const panelSearch = computed({
+  get: () => isAppCenterOpen.value ? appCenterSearch.value : store.search,
+  set: (value: string) => {
+    if (isAppCenterOpen.value) appCenterSearch.value = value;
+    else store.search = value;
+  },
+});
+watch(isAppCenterOpen, () => { appCenterSearch.value = ""; });
 const pendingDeleteContextKey = ref<string | null>(null);
 const editingClipKey = ref<string | null>(null);
 const editingClipName = ref("");
@@ -966,7 +976,6 @@ function hasQuickPreviewModifier(event: KeyboardEvent) {
 type PanelKey = "ArrowDown" | "ArrowUp" | "ArrowRight" | "ArrowLeft" | "Enter" | "Escape";
 
 function handlePanelKey(key: string) {
-  if (isAppCenterOpen.value) return false;
   if (updater.updateDialogOpen.value) {
     if (key === "Escape") updater.dismissUpdateDialog();
     return true;
@@ -974,6 +983,15 @@ function handlePanelKey(key: string) {
   if (showStarPrompt.value && key === "Escape") {
     hideStarSupport();
     return true;
+  }
+
+  if (isAppCenterOpen.value) {
+    if (appCenterElement.value?.handleNativePanelKey(key)) return true;
+    if (key === "Escape") {
+      isAppCenterOpen.value = false;
+      return true;
+    }
+    return false;
   }
 
   if (contextMenu.value) {
@@ -1265,7 +1283,7 @@ function scrollSelectedClipIntoView() {
     <section class="flex min-w-0 flex-1 flex-col">
       <div class="relative">
         <TopBar
-          v-model="store.search"
+          v-model="panelSearch"
           :shortcut="formattedShortcut"
           :settings-open="false"
           :app-center-open="isAppCenterOpen"
@@ -1335,7 +1353,7 @@ function scrollSelectedClipIntoView() {
           @reorder="reorderCategories"
         />
 
-        <AppCenterView v-if="isAppCenterOpen" />
+        <AppCenterView v-if="isAppCenterOpen" ref="appCenterElement" :search="appCenterSearch" @clear-search="appCenterSearch = ''" />
 
         <section v-else class="clip-area">
           <div v-if="store.error" class="mx-4 mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
