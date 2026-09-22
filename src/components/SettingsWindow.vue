@@ -41,6 +41,7 @@ import { useSettingsNavigation } from "../composables/useSettingsNavigation";
 import { languageOptions, t } from "../i18n";
 import { ipasteApi } from "../lib/ipasteApi";
 import { formatShortcut } from "../lib/format";
+import { shortcutsEqual } from "../lib/shortcuts";
 import {
   IPASTE_GITHUB_REPOSITORY_URL,
   openGitHubRepository,
@@ -51,6 +52,8 @@ import type { AppInfo, Language, PanelLayout, PanelOpenBehavior } from "../types
 const logoUrl = new URL("../../src-tauri/icons/tray-icon@2x.png", import.meta.url).href;
 const store = useIpasteStore();
 const DEFAULT_SHORTCUT = "CommandOrControl+Shift+V";
+const DEFAULT_APP_CENTER_SHORTCUT = "CommandOrControl+Shift+A";
+type ShortcutTarget = "panel" | "appCenter";
 type SettingsTab = "general" | "shortcuts" | "ocr" | "dataManagement" | "permissions" | "about";
 const activeTab = ref<SettingsTab>("general");
 const hasOpenedOcr = ref(false);
@@ -58,10 +61,12 @@ const ocrNavigationRevision = ref(0);
 const settingsLoadError = ref<string | null>(null);
 const showPermissionGuide = ref(false);
 const shortcutDraft = ref(DEFAULT_SHORTCUT);
-const shortcutRecording = ref(false);
+const appCenterShortcutDraft = ref(DEFAULT_APP_CENTER_SHORTCUT);
+const shortcutRecordingTarget = ref<ShortcutTarget | null>(null);
+const shortcutFeedbackTarget = ref<ShortcutTarget | null>(null);
 const shortcutMessage = ref<string | null>(null);
 const shortcutError = ref<string | null>(null);
-const isSavingShortcut = ref(false);
+const savingShortcutTarget = ref<ShortcutTarget | null>(null);
 const cloudApiAddress = ref("");
 const cloudApiKey = ref("");
 const cloudMessage = ref<string | null>(null);
@@ -156,8 +161,24 @@ const cloudStatusText = computed(() => {
   return store.cloud.enabled ? t("settings.cloud.enabled") : t("settings.cloud.disabled");
 });
 const formattedShortcutDraft = computed(() => formatShortcut(shortcutDraft.value || store.shortcut));
+const formattedAppCenterShortcutDraft = computed(() =>
+  formatShortcut(appCenterShortcutDraft.value || store.appCenterShortcut),
+);
 const canSaveShortcut = computed(() =>
-  Boolean(shortcutDraft.value && shortcutDraft.value !== store.shortcut && !isSavingShortcut.value),
+  Boolean(
+    shortcutDraft.value
+      && !shortcutsEqual(shortcutDraft.value, store.shortcut, isMacOs)
+      && !shortcutsEqual(shortcutDraft.value, store.appCenterShortcut, isMacOs)
+      && !savingShortcutTarget.value,
+  ),
+);
+const canSaveAppCenterShortcut = computed(() =>
+  Boolean(
+    appCenterShortcutDraft.value
+      && !shortcutsEqual(appCenterShortcutDraft.value, store.appCenterShortcut, isMacOs)
+      && !shortcutsEqual(appCenterShortcutDraft.value, store.shortcut, isMacOs)
+      && !savingShortcutTarget.value,
+  ),
 );
 const fixedShortcuts = computed(() => [
   { keys: [formatShortcut("CommandOrControl+F")], action: t("settings.shortcuts.focusSearch") },
@@ -242,22 +263,25 @@ async function toggleAutostart() {
 
 function resetShortcutForm() {
   shortcutDraft.value = store.shortcut || DEFAULT_SHORTCUT;
+  appCenterShortcutDraft.value = store.appCenterShortcut || DEFAULT_APP_CENTER_SHORTCUT;
+  shortcutFeedbackTarget.value = null;
   shortcutMessage.value = null;
   shortcutError.value = null;
 }
 
-async function startRecordingShortcut() {
-  if (shortcutRecording.value) return;
+async function startRecordingShortcut(target: ShortcutTarget) {
+  if (shortcutRecordingTarget.value) return;
+  shortcutFeedbackTarget.value = target;
   if (!(await pauseAppShortcutWhileRecording())) return;
-  shortcutRecording.value = true;
+  shortcutRecordingTarget.value = target;
   shortcutMessage.value = null;
   shortcutError.value = null;
   window.addEventListener("keydown", handleShortcutRecording, { capture: true });
 }
 
 async function stopRecordingShortcut(options: { restoreAppShortcut?: boolean } = {}) {
-  if (shortcutRecording.value) {
-    shortcutRecording.value = false;
+  if (shortcutRecordingTarget.value) {
+    shortcutRecordingTarget.value = null;
     window.removeEventListener("keydown", handleShortcutRecording, { capture: true });
   }
   if (options.restoreAppShortcut) {
@@ -276,13 +300,22 @@ function handleShortcutRecording(event: KeyboardEvent) {
   }
 
   const shortcut = shortcutFromKeyboardEvent(event);
+  const target = shortcutRecordingTarget.value;
+  if (!target) return;
   if (!shortcut) {
+    shortcutFeedbackTarget.value = target;
     shortcutError.value = t("settings.shortcuts.invalid");
     return;
   }
 
-  shortcutDraft.value = shortcut;
-  shortcutError.value = null;
+  const otherShortcut = target === "panel" ? appCenterShortcutDraft.value : shortcutDraft.value;
+  if (target === "panel") {
+    shortcutDraft.value = shortcut;
+  } else {
+    appCenterShortcutDraft.value = shortcut;
+  }
+  shortcutFeedbackTarget.value = target;
+  shortcutError.value = shortcutsEqual(shortcut, otherShortcut, isMacOs) ? t("settings.shortcuts.duplicate") : null;
   void stopRecordingShortcut({ restoreAppShortcut: true });
 }
 
@@ -353,27 +386,47 @@ function shortcutKeyFromEvent(event: KeyboardEvent) {
   return specialKeys[event.code] ?? "";
 }
 
-async function saveShortcut() {
+async function saveShortcut(target: ShortcutTarget) {
   await stopRecordingShortcut({ restoreAppShortcut: true });
+  shortcutFeedbackTarget.value = target;
   shortcutMessage.value = null;
   shortcutError.value = null;
-  isSavingShortcut.value = true;
+  const shortcut = target === "panel" ? shortcutDraft.value : appCenterShortcutDraft.value;
+  const otherShortcut = target === "panel" ? store.appCenterShortcut : store.shortcut;
+  if (shortcutsEqual(shortcut, otherShortcut, isMacOs)) {
+    shortcutError.value = t("settings.shortcuts.duplicate");
+    return;
+  }
+
+  savingShortcutTarget.value = target;
   try {
-    await store.updateShortcut(shortcutDraft.value);
-    shortcutDraft.value = store.shortcut;
+    if (target === "panel") {
+      await store.updateShortcut(shortcut);
+      shortcutDraft.value = store.shortcut;
+    } else {
+      await store.updateAppCenterShortcut(shortcut);
+      appCenterShortcutDraft.value = store.appCenterShortcut;
+    }
     shortcutMessage.value = t("settings.shortcuts.saved");
   } catch (unknownError) {
     shortcutError.value = String(unknownError);
   } finally {
-    isSavingShortcut.value = false;
+    savingShortcutTarget.value = null;
   }
 }
 
-function restoreDefaultShortcut() {
+function restoreDefaultShortcut(target: ShortcutTarget) {
   void stopRecordingShortcut({ restoreAppShortcut: true });
-  shortcutDraft.value = DEFAULT_SHORTCUT;
+  const defaultShortcut = target === "panel" ? DEFAULT_SHORTCUT : DEFAULT_APP_CENTER_SHORTCUT;
+  const otherShortcut = target === "panel" ? appCenterShortcutDraft.value : shortcutDraft.value;
+  if (target === "panel") {
+    shortcutDraft.value = defaultShortcut;
+  } else {
+    appCenterShortcutDraft.value = defaultShortcut;
+  }
+  shortcutFeedbackTarget.value = target;
   shortcutMessage.value = null;
-  shortcutError.value = null;
+  shortcutError.value = shortcutsEqual(defaultShortcut, otherShortcut, isMacOs) ? t("settings.shortcuts.duplicate") : null;
 }
 
 function resetCloudForm() {
@@ -659,19 +712,19 @@ async function updateLanguage(language: Language) {
                 <button
                   type="button"
                   class="shortcut-capture-button"
-                  :class="{ 'shortcut-capture-button-recording': shortcutRecording }"
-                  :aria-pressed="shortcutRecording"
-                  @click="startRecordingShortcut"
+                  :class="{ 'shortcut-capture-button-recording': shortcutRecordingTarget === 'panel' }"
+                  :aria-pressed="shortcutRecordingTarget === 'panel'"
+                  @click="startRecordingShortcut('panel')"
                 >
                   <Keyboard class="size-4" />
-                  <span>{{ shortcutRecording ? t("settings.shortcuts.recording") : formattedShortcutDraft }}</span>
+                  <span>{{ shortcutRecordingTarget === "panel" ? t("settings.shortcuts.recording") : formattedShortcutDraft }}</span>
                 </button>
 
                 <button
                   type="button"
                   class="settings-action-button"
-                  :disabled="isSavingShortcut"
-                  @click="restoreDefaultShortcut"
+                  :disabled="Boolean(savingShortcutTarget)"
+                  @click="restoreDefaultShortcut('panel')"
                 >
                   <RotateCcw class="size-4" />
                   <span>{{ t("settings.shortcuts.restoreDefault") }}</span>
@@ -681,15 +734,70 @@ async function updateLanguage(language: Language) {
                   type="button"
                   class="settings-action-button settings-action-button-primary"
                   :disabled="!canSaveShortcut"
-                  @click="saveShortcut"
+                  @click="saveShortcut('panel')"
                 >
                   <Save class="size-4" />
-                  <span>{{ isSavingShortcut ? t("common.saving") : t("common.save") }}</span>
+                  <span>{{ savingShortcutTarget === "panel" ? t("common.saving") : t("common.save") }}</span>
                 </button>
               </div>
 
               <p
-                v-if="shortcutError || shortcutMessage"
+                v-if="shortcutFeedbackTarget === 'panel' && (shortcutError || shortcutMessage)"
+                class="settings-message"
+                :class="{ 'settings-message-error': shortcutError }"
+              >
+                <CheckCircle2 v-if="shortcutMessage && !shortcutError" class="size-4" />
+                <AlertCircle v-else class="size-4" />
+                <span>{{ shortcutError || shortcutMessage }}</span>
+              </p>
+            </section>
+
+            <section class="settings-shortcuts-item settings-shortcuts-item-column">
+              <div class="settings-panel-heading">
+                <div class="settings-icon settings-icon-blue">
+                  <Blocks class="size-5" />
+                </div>
+                <div class="min-w-0 flex-1">
+                  <h2 class="text-sm font-semibold text-slate-950">{{ t("settings.shortcuts.appCenter.title") }}</h2>
+                  <p class="mt-1 text-sm text-slate-500">{{ t("settings.shortcuts.appCenter.description") }}</p>
+                </div>
+              </div>
+
+              <div class="settings-shortcut-recorder">
+                <button
+                  type="button"
+                  class="shortcut-capture-button"
+                  :class="{ 'shortcut-capture-button-recording': shortcutRecordingTarget === 'appCenter' }"
+                  :aria-pressed="shortcutRecordingTarget === 'appCenter'"
+                  @click="startRecordingShortcut('appCenter')"
+                >
+                  <Keyboard class="size-4" />
+                  <span>{{ shortcutRecordingTarget === "appCenter" ? t("settings.shortcuts.recording") : formattedAppCenterShortcutDraft }}</span>
+                </button>
+
+                <button
+                  type="button"
+                  class="settings-action-button"
+                  :disabled="Boolean(savingShortcutTarget)"
+                  @click="restoreDefaultShortcut('appCenter')"
+                >
+                  <RotateCcw class="size-4" />
+                  <span>{{ t("settings.shortcuts.restoreDefault") }}</span>
+                </button>
+
+                <button
+                  type="button"
+                  class="settings-action-button settings-action-button-primary"
+                  :disabled="!canSaveAppCenterShortcut"
+                  @click="saveShortcut('appCenter')"
+                >
+                  <Save class="size-4" />
+                  <span>{{ savingShortcutTarget === "appCenter" ? t("common.saving") : t("common.save") }}</span>
+                </button>
+              </div>
+
+              <p
+                v-if="shortcutFeedbackTarget === 'appCenter' && (shortcutError || shortcutMessage)"
                 class="settings-message"
                 :class="{ 'settings-message-error': shortcutError }"
               >

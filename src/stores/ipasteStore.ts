@@ -39,6 +39,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
   const selectedIndex = ref(0);
   const search = ref("");
   const shortcut = ref("CommandOrControl+Shift+V");
+  const appCenterShortcut = ref("CommandOrControl+Shift+A");
   const isListening = ref(true);
   const isAppendCopyEnabled = ref(false);
   const isLoading = ref(false);
@@ -114,6 +115,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
       categories.value = snapshot.categories;
       categoryItems.value = snapshot.categoryItems;
       shortcut.value = snapshot.shortcut;
+      appCenterShortcut.value = snapshot.settings.appCenterShortcut;
       isListening.value = snapshot.isListening;
       isAppendCopyEnabled.value = snapshot.isAppendCopyEnabled;
       retentionDays.value = snapshot.settings.retentionDays;
@@ -517,6 +519,11 @@ export const useIpasteStore = defineStore("ipaste", () => {
     applySettings(settings);
   }
 
+  async function updateAppCenterShortcut(value: string) {
+    const settings = await ipasteApi.updateAppCenterShortcut(value);
+    applySettings(settings);
+  }
+
   async function updatePanelOpenBehavior(behavior: PanelOpenBehavior) {
     const settings = await ipasteApi.updatePanelOpenBehavior(behavior);
     applySettings(settings);
@@ -623,6 +630,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
     categories.value = snapshot.categories;
     categoryItems.value = snapshot.categoryItems;
     shortcut.value = snapshot.shortcut;
+    appCenterShortcut.value = snapshot.settings.appCenterShortcut;
     isListening.value = snapshot.isListening;
     isAppendCopyEnabled.value = snapshot.isAppendCopyEnabled;
     retentionDays.value = snapshot.settings.retentionDays;
@@ -644,6 +652,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
 
   function applySettings(settings: {
     shortcut: string;
+    appCenterShortcut: string;
     retentionDays: number;
     appendCopyTimeoutMinutes?: number;
     panelOpenBehavior: PanelOpenBehavior;
@@ -653,6 +662,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
     cloud: CloudSettings;
   }) {
     shortcut.value = settings.shortcut;
+    appCenterShortcut.value = settings.appCenterShortcut;
     retentionDays.value = settings.retentionDays;
     appendCopyTimeoutMinutes.value = cleanAppendCopyTimeoutMinutes(settings.appendCopyTimeoutMinutes);
     panelOpenBehavior.value = settings.panelOpenBehavior;
@@ -839,6 +849,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
     selectedIndex,
     search,
     shortcut,
+    appCenterShortcut,
     isListening,
     isAppendCopyEnabled,
     isLoading,
@@ -887,6 +898,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
     updateRetentionDays,
     updateAppendCopyTimeout,
     updateShortcut,
+    updateAppCenterShortcut,
     updatePanelOpenBehavior,
     updatePanelLayout,
     updateOcrMode,

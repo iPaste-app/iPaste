@@ -78,7 +78,7 @@ test("character metrics preserve emoji and combining-character counts", () => {
 
 test("Chinese composition only publishes the committed search", async () => {
   const values = [];
-  const props = reactive({modelValue: "", shortcut: "", settingsOpen: false,
+  const props = reactive({modelValue: "", shortcut: "", settingsOpen: false, appCenterOpen: false,
     appendCopyEnabled: false, appendCopyTimeoutMinutes: 1,
     "onUpdate:modelValue": value => {values.push(value); props.modelValue = value;}});
   const root = node("root");
@@ -102,7 +102,7 @@ test("Chinese composition only publishes the committed search", async () => {
 test("typing reuses matching card objects and still searches beyond the loaded page", async () => {
   const {store, requests} = storeFixture();
   store.clips = [clip("one", "hello needle"), clip("two", "other")];
-  const visible = store.visibleItems[0];
+  const visible = store.visibleItems.find(item => item.id === "one");
   store.search = "needle";
   assert.equal(store.visibleItems.length, 1);
   assert.equal(store.visibleItems[0], visible);

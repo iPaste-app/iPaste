@@ -16,6 +16,8 @@ mod pinning;
 mod pinning_tests;
 #[cfg(test)]
 mod window_size_tests;
+#[cfg(test)]
+mod mfa_tests;
 use ocr_error::ImageOcrError;
 
 #[cfg(target_os = "macos")]
@@ -100,6 +102,8 @@ const MAIN_WINDOW: &str = "main";
 const SETTINGS_WINDOW: &str = "settings";
 const CLIP_VIEWER_WINDOW_PREFIX: &str = "clip-viewer-";
 const DEFAULT_SHORTCUT: &str = "CommandOrControl+Shift+V";
+const DEFAULT_APP_CENTER_SHORTCUT: &str = "CommandOrControl+Shift+A";
+const FALLBACK_APP_CENTER_SHORTCUT: &str = "CommandOrControl+Alt+Shift+A";
 const PAUSE_CAPTURE_LABEL: &str = "暂停捕捉";
 const RESUME_CAPTURE_LABEL: &str = "恢复捕捉";
 const ENABLE_APPEND_COPY_LABEL: &str = "开启追加复制";
@@ -520,6 +524,7 @@ struct ClipPage {
 #[serde(rename_all = "camelCase")]
 struct AppSettings {
     shortcut: String,
+    app_center_shortcut: String,
     retention_days: i64,
     append_copy_timeout_minutes: i64,
     panel_open_behavior: String,
@@ -536,6 +541,53 @@ struct CloudSettings {
     api_key: String,
     enabled: bool,
     last_connected_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MfaAccount {
+    id: String,
+    name: String,
+    issuer: Option<String>,
+    description: Option<String>,
+    secret: String,
+    algorithm: String,
+    digits: i64,
+    period: i64,
+    source_uri: Option<String>,
+    created_at: String,
+    updated_at: String,
+    last_used_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MfaAccountInput {
+    name: String,
+    #[serde(default)]
+    issuer: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    secret: String,
+    #[serde(default)]
+    algorithm: Option<String>,
+    #[serde(default)]
+    digits: Option<i64>,
+    #[serde(default)]
+    period: Option<i64>,
+    #[serde(default)]
+    source_uri: Option<String>,
+}
+
+struct CleanMfaAccountInput {
+    name: String,
+    issuer: Option<String>,
+    description: Option<String>,
+    secret: String,
+    algorithm: String,
+    digits: i64,
+    period: i64,
+    source_uri: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -744,6 +796,7 @@ struct AppState {
     target_app_bundle_id: Arc<Mutex<Option<String>>>,
     main_window_activation: Arc<Mutex<MainWindowActivation>>,
     active_shortcut: Arc<Mutex<String>>,
+    active_app_center_shortcut: Arc<Mutex<String>>,
     is_app_shortcut_enabled: Arc<Mutex<bool>>,
     #[cfg(target_os = "macos")]
     main_panel_state: Arc<Mutex<Option<MainPanelState>>>,
@@ -836,6 +889,24 @@ impl Store {
                 created_at TEXT NOT NULL,
                 PRIMARY KEY(entity, entity_id)
             );
+
+            CREATE TABLE IF NOT EXISTS app_mfa_accounts (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                issuer TEXT,
+                description TEXT,
+                secret TEXT NOT NULL,
+                algorithm TEXT NOT NULL DEFAULT 'SHA1',
+                digits INTEGER NOT NULL DEFAULT 6,
+                period INTEGER NOT NULL DEFAULT 30,
+                source_uri TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_used_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_app_mfa_accounts_last_used
+                ON app_mfa_accounts(datetime(COALESCE(last_used_at, updated_at)) DESC);
             ",
         )
         .map_err(|error| error.to_string())?;
@@ -1065,6 +1136,17 @@ impl Store {
             .setting_value_with_conn(conn, "shortcut")?
             .and_then(|value| clean_shortcut(value).ok())
             .unwrap_or_else(|| DEFAULT_SHORTCUT.to_string());
+        let mut app_center_shortcut = self
+            .setting_value_with_conn(conn, "app_center_shortcut")?
+            .and_then(|value| clean_shortcut(value).ok())
+            .unwrap_or_else(|| DEFAULT_APP_CENTER_SHORTCUT.to_string());
+        if ensure_shortcuts_differ(&shortcut, &app_center_shortcut).is_err() {
+            app_center_shortcut = if ensure_shortcuts_differ(&shortcut, DEFAULT_APP_CENTER_SHORTCUT).is_err() {
+                FALLBACK_APP_CENTER_SHORTCUT.to_string()
+            } else {
+                DEFAULT_APP_CENTER_SHORTCUT.to_string()
+            };
+        }
         let retention_days = conn
             .query_row(
                 "SELECT value FROM settings WHERE key = 'retention_days'",
@@ -1106,6 +1188,7 @@ impl Store {
 
         Ok(AppSettings {
             shortcut,
+            app_center_shortcut,
             retention_days,
             append_copy_timeout_minutes,
             panel_open_behavior,
@@ -1121,6 +1204,18 @@ impl Store {
         let conn = self.connect()?;
         conn.execute(
             "INSERT INTO settings (key, value) VALUES ('shortcut', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![shortcut],
+        )
+        .map_err(|error| error.to_string())?;
+        self.settings_with_conn(&conn)
+    }
+
+    fn update_app_center_shortcut(&self, shortcut: String) -> Result<AppSettings, String> {
+        let shortcut = clean_shortcut(shortcut)?;
+        let conn = self.connect()?;
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('app_center_shortcut', ?1)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![shortcut],
         )
@@ -1645,6 +1740,135 @@ impl Store {
         conn.query_row("SELECT COUNT(*) FROM clips", [], |row| row.get::<_, i64>(0))
             .map(|count| count as usize)
             .map_err(|error| error.to_string())
+    }
+
+    fn list_mfa_accounts(&self) -> Result<Vec<MfaAccount>, String> {
+        let conn = self.connect()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, issuer, description, secret, algorithm, digits, period, source_uri, created_at, updated_at, last_used_at
+                 FROM app_mfa_accounts
+                 ORDER BY datetime(COALESCE(last_used_at, updated_at)) DESC, lower(name) ASC",
+            )
+            .map_err(|error| error.to_string())?;
+
+        let rows = stmt
+            .query_map([], map_mfa_account)
+            .map_err(|error| error.to_string())?;
+        collect_rows(rows)
+    }
+
+    fn create_mfa_account(&self, input: MfaAccountInput) -> Result<MfaAccount, String> {
+        let input = clean_mfa_account_input(input)?;
+        let conn = self.connect()?;
+        let timestamp = now();
+        let account = MfaAccount {
+            id: new_id(),
+            name: input.name,
+            issuer: input.issuer,
+            description: input.description,
+            secret: input.secret,
+            algorithm: input.algorithm,
+            digits: input.digits,
+            period: input.period,
+            source_uri: input.source_uri,
+            created_at: timestamp.clone(),
+            updated_at: timestamp,
+            last_used_at: None,
+        };
+
+        conn.execute(
+            "INSERT INTO app_mfa_accounts (id, name, issuer, description, secret, algorithm, digits, period, source_uri, created_at, updated_at, last_used_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                account.id,
+                account.name,
+                account.issuer,
+                account.description,
+                account.secret,
+                account.algorithm,
+                account.digits,
+                account.period,
+                account.source_uri,
+                account.created_at,
+                account.updated_at,
+                account.last_used_at,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+
+        Ok(account)
+    }
+
+    fn update_mfa_account(
+        &self,
+        id: String,
+        input: MfaAccountInput,
+    ) -> Result<MfaAccount, String> {
+        let id = id.trim().to_string();
+        if id.is_empty() {
+            return Err("未找到 MFA 条目".to_string());
+        }
+
+        let input = clean_mfa_account_input(input)?;
+        let conn = self.connect()?;
+        conn.execute(
+            "UPDATE app_mfa_accounts
+             SET name = ?1,
+                 issuer = ?2,
+                 description = ?3,
+                 secret = ?4,
+                 algorithm = ?5,
+                 digits = ?6,
+                 period = ?7,
+                 source_uri = ?8,
+                 updated_at = ?9
+             WHERE id = ?10",
+            params![
+                input.name,
+                input.issuer,
+                input.description,
+                input.secret,
+                input.algorithm,
+                input.digits,
+                input.period,
+                input.source_uri,
+                now(),
+                id,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+
+        self.get_mfa_account_with_conn(&conn, &id)
+    }
+
+    fn delete_mfa_account(&self, id: String) -> Result<(), String> {
+        let conn = self.connect()?;
+        conn.execute("DELETE FROM app_mfa_accounts WHERE id = ?1", params![id])
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    fn touch_mfa_account(&self, id: String) -> Result<MfaAccount, String> {
+        let conn = self.connect()?;
+        conn.execute(
+            "UPDATE app_mfa_accounts SET last_used_at = ?1 WHERE id = ?2",
+            params![now(), id],
+        )
+        .map_err(|error| error.to_string())?;
+        self.get_mfa_account_with_conn(&conn, &id)
+    }
+
+    fn get_mfa_account_with_conn(&self, conn: &Connection, id: &str) -> Result<MfaAccount, String> {
+        conn.query_row(
+            "SELECT id, name, issuer, description, secret, algorithm, digits, period, source_uri, created_at, updated_at, last_used_at
+             FROM app_mfa_accounts WHERE id = ?1",
+            params![id],
+            map_mfa_account,
+        )
+        .optional()
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "未找到 MFA 条目".to_string())
     }
 
     fn save_image_bytes(&self, content_hash: &str, bytes: &[u8]) -> Result<String, String> {
@@ -2453,6 +2677,41 @@ fn list_category_items(state: tauri::State<'_, AppState>) -> Result<Vec<Category
 }
 
 #[tauri::command]
+fn list_mfa_accounts(state: tauri::State<'_, AppState>) -> Result<Vec<MfaAccount>, String> {
+    state.store.list_mfa_accounts()
+}
+
+#[tauri::command]
+fn create_mfa_account(
+    state: tauri::State<'_, AppState>,
+    input: MfaAccountInput,
+) -> Result<MfaAccount, String> {
+    state.store.create_mfa_account(input)
+}
+
+#[tauri::command]
+fn update_mfa_account(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    input: MfaAccountInput,
+) -> Result<MfaAccount, String> {
+    state.store.update_mfa_account(id, input)
+}
+
+#[tauri::command]
+fn delete_mfa_account(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+    state.store.delete_mfa_account(id)
+}
+
+#[tauri::command]
+fn touch_mfa_account(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<MfaAccount, String> {
+    state.store.touch_mfa_account(id)
+}
+
+#[tauri::command]
 fn reorder_categories(
     state: tauri::State<'_, AppState>,
     category_ids: Vec<String>,
@@ -2592,6 +2851,21 @@ fn copy_clip(
 }
 
 #[tauri::command]
+fn copy_text_ephemeral(
+    state: tauri::State<'_, AppState>,
+    text: String,
+) -> Result<(), String> {
+    let text = clean_ephemeral_text(text)?;
+    write_clipboard_text(&text)?;
+    remember_current_clipboard_marker(
+        &state.last_clipboard_change_id,
+        &state.last_clipboard_hash,
+        Some(hash_text(&text)),
+    );
+    Ok(())
+}
+
+#[tauri::command]
 fn set_listening(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
@@ -2668,6 +2942,19 @@ fn update_shortcut(
     let shortcut = clean_shortcut(shortcut)?;
     update_registered_app_shortcut(&app, &state, &shortcut)?;
     let settings = state.store.update_shortcut(shortcut)?;
+    emit_settings_changed(&app, &settings);
+    Ok(settings)
+}
+
+#[tauri::command]
+fn update_app_center_shortcut(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    shortcut: String,
+) -> Result<AppSettings, String> {
+    let shortcut = clean_shortcut(shortcut)?;
+    update_registered_app_center_shortcut(&app, &state, &shortcut)?;
+    let settings = state.store.update_app_center_shortcut(shortcut)?;
     emit_settings_changed(&app, &settings);
     Ok(settings)
 }
@@ -2930,6 +3217,33 @@ async fn recognize_image_text(
 }
 
 #[tauri::command]
+fn read_clip_image_data_url(
+    state: tauri::State<'_, AppState>,
+    image_path: String,
+) -> Result<String, String> {
+    if image_path.starts_with("data:image/") {
+        return Ok(image_path);
+    }
+
+    let path = PathBuf::from(&image_path);
+    let canonical_path = path.canonicalize().map_err(|error| error.to_string())?;
+    let canonical_image_dir = state
+        .store
+        .image_dir()?
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    if !canonical_path.starts_with(canonical_image_dir) {
+        return Err("只能读取 iPaste 剪贴板图片".to_string());
+    }
+
+    let bytes = fs::read(&canonical_path).map_err(|error| error.to_string())?;
+    Ok(format!(
+        "data:image/png;base64,{}",
+        general_purpose::STANDARD.encode(bytes)
+    ))
+}
+
+#[tauri::command]
 fn sync_cloud_now(state: tauri::State<'_, AppState>) -> Result<AppSnapshot, String> {
     state.store.sync_cloud()?;
     let (clip_page, categories, category_items) = state.store.snapshot()?;
@@ -3163,6 +3477,41 @@ fn apply_clip(
     Ok(())
 }
 
+#[tauri::command]
+fn apply_text_ephemeral(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    text: String,
+) -> Result<(), String> {
+    let text = clean_ephemeral_text(text)?;
+    write_clipboard_text(&text)?;
+    remember_current_clipboard_marker(
+        &state.last_clipboard_change_id,
+        &state.last_clipboard_hash,
+        Some(hash_text(&text)),
+    );
+
+    let target_app_bundle_id = state
+        .target_app_bundle_id
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+
+    let _ = hide_main_window(&app);
+
+    if let Err(error) = prepare_target_for_paste(&app, target_app_bundle_id) {
+        let _ = show_main_window(&app, MainWindowActivation::Activate);
+        return Err(error);
+    }
+
+    if let Err(error) = send_paste_shortcut() {
+        let _ = show_main_window(&app, MainWindowActivation::Activate);
+        return Err(error);
+    }
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -3188,15 +3537,33 @@ pub fn run() {
                     else {
                         return;
                     };
-                    if !shortcut_matches(shortcut, &active_shortcut) {
+                    let Ok(active_app_center_shortcut) = state
+                        .active_app_center_shortcut
+                        .lock()
+                        .map(|value| value.clone())
+                    else {
+                        return;
+                    };
+                    let opens_app_center = shortcut_matches(shortcut, &active_app_center_shortcut);
+                    if !opens_app_center && !shortcut_matches(shortcut, &active_shortcut) {
                         return;
                     }
 
                     remember_target_app_for_paste(app);
                     let app = app.clone();
+                    let opened_shortcut = if opens_app_center {
+                        active_app_center_shortcut
+                    } else {
+                        active_shortcut
+                    };
                     thread::spawn(move || {
                         let _ = show_main_window(&app, MainWindowActivation::PreserveCurrentApp);
-                        let _ = app.emit("ipaste://shortcut-opened", active_shortcut);
+                        let event_name = if opens_app_center {
+                            "ipaste://app-center-shortcut-opened"
+                        } else {
+                            "ipaste://shortcut-opened"
+                        };
+                        let _ = app.emit(event_name, opened_shortcut);
                     });
                 })
                 .build(),
@@ -3208,6 +3575,11 @@ pub fn run() {
             list_clips,
             list_categories,
             list_category_items,
+            list_mfa_accounts,
+            create_mfa_account,
+            update_mfa_account,
+            delete_mfa_account,
+            touch_mfa_account,
             reorder_categories,
             reorder_category_items,
             create_category,
@@ -3221,6 +3593,7 @@ pub fn run() {
             update_clip_content,
             set_clip_pinned,
             copy_clip,
+            copy_text_ephemeral,
             set_listening,
             set_append_copy_enabled,
             update_settings,
@@ -3229,6 +3602,7 @@ pub fn run() {
             mark_star_prompt_starred,
             update_append_copy_timeout,
             update_shortcut,
+            update_app_center_shortcut,
             set_app_shortcut_enabled,
             update_panel_open_behavior,
             update_panel_layout,
@@ -3242,6 +3616,7 @@ pub fn run() {
             install_ocr_assets,
             remove_ocr_assets,
             recognize_image_text,
+            read_clip_image_data_url,
             sync_cloud_now,
             sync_cloud_in_background,
             show_panel,
@@ -3254,7 +3629,8 @@ pub fn run() {
             open_accessibility_settings,
             set_main_window_dragging,
             start_main_window_drag,
-            apply_clip
+            apply_clip,
+            apply_text_ephemeral
         ])
         .setup(|app| {
             app.handle()
@@ -3325,6 +3701,9 @@ pub fn run() {
                 target_app_bundle_id: Arc::new(Mutex::new(None)),
                 main_window_activation: Arc::new(Mutex::new(MainWindowActivation::Activate)),
                 active_shortcut: Arc::new(Mutex::new(settings.shortcut.clone())),
+                active_app_center_shortcut: Arc::new(Mutex::new(
+                    settings.app_center_shortcut.clone(),
+                )),
                 is_app_shortcut_enabled: Arc::new(Mutex::new(true)),
                 #[cfg(target_os = "macos")]
                 main_panel_state: Arc::new(Mutex::new(None)),
@@ -3351,6 +3730,7 @@ pub fn run() {
                 settings.language.as_str(),
             )?;
             register_app_shortcut(app.handle(), &settings.shortcut)?;
+            register_app_shortcut(app.handle(), &settings.app_center_shortcut)?;
             show_main_window(app.handle(), MainWindowActivation::Activate)?;
             Ok(())
         })
@@ -4167,11 +4547,27 @@ fn set_app_shortcut_enabled_inner(
         .lock()
         .map_err(|error| error.to_string())?
         .clone();
+    let app_center_shortcut = state
+        .active_app_center_shortcut
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
 
     if enabled {
+        let panel_was_registered = app.global_shortcut().is_registered(shortcut.as_str());
         register_app_shortcut(app, &shortcut)?;
+        if let Err(error) = register_app_shortcut(app, &app_center_shortcut) {
+            if !panel_was_registered {
+                let _ = unregister_app_shortcut(app, &shortcut);
+            }
+            return Err(error);
+        }
     } else {
         unregister_app_shortcut(app, &shortcut)?;
+        if let Err(error) = unregister_app_shortcut(app, &app_center_shortcut) {
+            let _ = register_app_shortcut(app, &shortcut);
+            return Err(error);
+        }
     }
 
     *state
@@ -4186,6 +4582,13 @@ fn update_registered_app_shortcut(
     state: &AppState,
     shortcut: &str,
 ) -> Result<(), String> {
+    let app_center_shortcut = state
+        .active_app_center_shortcut
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    ensure_shortcuts_differ(shortcut, &app_center_shortcut)?;
+
     let mut active_shortcut = state
         .active_shortcut
         .lock()
@@ -4222,6 +4625,54 @@ fn update_registered_app_shortcut(
     }
 
     *active_shortcut = shortcut.to_string();
+    Ok(())
+}
+
+fn update_registered_app_center_shortcut(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    shortcut: &str,
+) -> Result<(), String> {
+    let panel_shortcut = state
+        .active_shortcut
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    ensure_shortcuts_differ(&panel_shortcut, shortcut)?;
+
+    let mut active_shortcut = state
+        .active_app_center_shortcut
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let previous = active_shortcut.clone();
+
+    if previous == shortcut {
+        if is_app_shortcut_enabled(state)? && !app.global_shortcut().is_registered(shortcut) {
+            register_app_shortcut(app, shortcut)?;
+        }
+        return Ok(());
+    }
+
+    let was_enabled = is_app_shortcut_enabled(state)?;
+    unregister_app_shortcut(app, previous.as_str())?;
+
+    if was_enabled {
+        if let Err(error) = register_app_shortcut(app, shortcut) {
+            let _ = register_app_shortcut(app, &previous);
+            return Err(error);
+        }
+    }
+
+    *active_shortcut = shortcut.to_string();
+    Ok(())
+}
+
+fn ensure_shortcuts_differ(panel_shortcut: &str, app_center_shortcut: &str) -> Result<(), String> {
+    let panel = panel_shortcut.parse::<Shortcut>().map_err(|error| error.to_string())?;
+    let app_center = app_center_shortcut.parse::<Shortcut>().map_err(|error| error.to_string())?;
+    if panel.id() == app_center.id() {
+        return Err("主面板快捷键与应用中心快捷键不能相同。".to_string());
+    }
     Ok(())
 }
 
@@ -5398,6 +5849,91 @@ fn clean_display_name(name: Option<String>) -> Result<Option<String>, String> {
     } else {
         Ok(Some(name))
     }
+}
+
+fn clean_mfa_account_input(input: MfaAccountInput) -> Result<CleanMfaAccountInput, String> {
+    let name = input.name.trim();
+    if name.is_empty() {
+        return Err("请输入 MFA 名称".to_string());
+    }
+
+    let secret = clean_mfa_secret(input.secret)?;
+    let algorithm = clean_mfa_algorithm(input.algorithm)?;
+    let digits = clean_mfa_digits(input.digits)?;
+    let period = clean_mfa_period(input.period)?;
+
+    Ok(CleanMfaAccountInput {
+        name: name.chars().take(80).collect(),
+        issuer: clean_optional_text(input.issuer, 80),
+        description: clean_optional_text(input.description, 240),
+        secret,
+        algorithm,
+        digits,
+        period,
+        source_uri: clean_optional_text(input.source_uri, 2048),
+    })
+}
+
+fn clean_mfa_secret(secret: String) -> Result<String, String> {
+    let normalized = secret
+        .chars()
+        .filter(|char| !char.is_whitespace() && !matches!(char, '-' | '='))
+        .flat_map(|char| char.to_uppercase())
+        .collect::<String>();
+
+    if normalized.len() < 8
+        || !normalized
+            .chars()
+            .all(|char| matches!(char, 'A'..='Z' | '2'..='7'))
+    {
+        return Err("MFA 密钥需为 Base32 格式".to_string());
+    }
+
+    Ok(normalized)
+}
+
+fn clean_mfa_algorithm(algorithm: Option<String>) -> Result<String, String> {
+    let normalized = algorithm
+        .unwrap_or_else(|| "SHA1".to_string())
+        .replace('-', "")
+        .to_ascii_uppercase();
+    match normalized.as_str() {
+        "SHA1" | "SHA256" | "SHA512" => Ok(normalized),
+        _ => Err("不支持的 MFA 算法".to_string()),
+    }
+}
+
+fn clean_mfa_digits(digits: Option<i64>) -> Result<i64, String> {
+    let digits = digits.unwrap_or(6);
+    if (6..=8).contains(&digits) {
+        Ok(digits)
+    } else {
+        Err("MFA 验证码位数需为 6 到 8 位".to_string())
+    }
+}
+
+fn clean_mfa_period(period: Option<i64>) -> Result<i64, String> {
+    let period = period.unwrap_or(30);
+    if (10..=120).contains(&period) {
+        Ok(period)
+    } else {
+        Err("MFA 刷新周期需在 10 到 120 秒之间".to_string())
+    }
+}
+
+fn clean_optional_text(value: Option<String>, max_chars: usize) -> Option<String> {
+    value
+        .map(|text| text.trim().chars().take(max_chars).collect::<String>())
+        .filter(|text| !text.is_empty())
+}
+
+fn clean_ephemeral_text(text: String) -> Result<String, String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err("没有可复制的内容".to_string());
+    }
+
+    Ok(text.chars().take(4096).collect())
 }
 
 fn clean_shortcut(shortcut: String) -> Result<String, String> {
@@ -6735,6 +7271,23 @@ fn map_category(row: &rusqlite::Row<'_>) -> rusqlite::Result<Category> {
         sort_order: row.get(3)?,
         created_at: row.get(4)?,
         updated_at: row.get(5)?,
+    })
+}
+
+fn map_mfa_account(row: &rusqlite::Row<'_>) -> rusqlite::Result<MfaAccount> {
+    Ok(MfaAccount {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        issuer: row.get(2)?,
+        description: row.get(3)?,
+        secret: row.get(4)?,
+        algorithm: row.get(5)?,
+        digits: row.get(6)?,
+        period: row.get(7)?,
+        source_uri: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
+        last_used_at: row.get(11)?,
     })
 }
 

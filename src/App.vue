@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { AlertCircle, CheckCircle2, ChevronRight, ClipboardCopy, CornerDownLeft, FolderInput, Inbox, Pencil, Plus, Trash2, X } from "lucide-vue-next";
+import AppCenterView from "./components/AppCenterView.vue";
 import CategoryRail from "./components/CategoryRail.vue";
 import ClipCard from "./components/ClipCard.vue";
 import ContentPinIcon from "./components/ContentPinIcon.vue";
@@ -53,6 +54,17 @@ const isQuickPreviewPinned = ref(false);
 const isQuickPreviewKeyDown = ref(false);
 const isQuickPreviewActive = ref(false);
 const quickPreviewSelectedText = ref("");
+const isAppCenterOpen = ref(false);
+const appCenterElement = ref<InstanceType<typeof AppCenterView> | null>(null);
+const appCenterSearch = ref("");
+const panelSearch = computed({
+  get: () => isAppCenterOpen.value ? appCenterSearch.value : store.search,
+  set: (value: string) => {
+    if (isAppCenterOpen.value) appCenterSearch.value = value;
+    else store.search = value;
+  },
+});
+watch(isAppCenterOpen, () => { appCenterSearch.value = ""; });
 const pendingDeleteContextKey = ref<string | null>(null);
 const editingClipKey = ref<string | null>(null);
 const editingClipName = ref("");
@@ -76,6 +88,7 @@ let itemDragState: {
   side: "before" | "after" | null;
 } | null = null;
 let unlistenShortcutOpened: UnlistenFn | null = null;
+let unlistenAppCenterShortcutOpened: UnlistenFn | null = null;
 let unlistenPanelVisibilityChanged: UnlistenFn | null = null;
 let unlistenPanelKey: UnlistenFn | null = null;
 let moveSubmenuCloseTimer: number | null = null;
@@ -161,6 +174,26 @@ const quickPreviewSize = computed(() => {
 });
 const quickPreviewColorValue = computed(() => quickPreviewContent.value.trim());
 
+function toggleAppCenter() {
+  isAppCenterOpen.value = !isAppCenterOpen.value;
+  closeFloatingLayers();
+  scheduleClipListScrollReset();
+  blurActiveElement();
+}
+
+function handlePanelShortcutOpened() {
+  isAppCenterOpen.value = false;
+  closeFloatingLayers();
+  scheduleClipListScrollReset();
+}
+
+function handleAppCenterShortcutOpened() {
+  isAppCenterOpen.value = true;
+  closeFloatingLayers();
+  scheduleClipListScrollReset();
+  blurActiveElement();
+}
+
 onMounted(async () => {
   if (isClipViewerWindow) return;
   if (isSettingsWindow) return;
@@ -180,7 +213,11 @@ onMounted(async () => {
     scheduleSilentUpdateCheck();
   }
   if (isTauri) {
-    unlistenShortcutOpened = await listen("ipaste://shortcut-opened", closeFloatingLayers);
+    unlistenShortcutOpened = await listen("ipaste://shortcut-opened", handlePanelShortcutOpened);
+    unlistenAppCenterShortcutOpened = await listen(
+      "ipaste://app-center-shortcut-opened",
+      handleAppCenterShortcutOpened,
+    );
     unlistenPanelKey = await listen<{ key: PanelKey }>("ipaste://panel-key", (event) => {
       handlePanelKey(event.payload.key);
     });
@@ -215,9 +252,11 @@ onUnmounted(() => {
   clearStarThanksTimer();
   cleanupItemDrag();
   unlistenShortcutOpened?.();
+  unlistenAppCenterShortcutOpened?.();
   unlistenPanelKey?.();
   unlistenPanelVisibilityChanged?.();
   unlistenShortcutOpened = null;
+  unlistenAppCenterShortcutOpened = null;
   unlistenPanelKey = null;
   unlistenPanelVisibilityChanged = null;
   document.body.classList.remove("ipaste-preserve-current-app");
@@ -262,6 +301,7 @@ function applyPanelVisibility(
     clearClipListScrollTimer();
     isClipListScrolling.value = false;
     store.clearSearch();
+    isAppCenterOpen.value = false;
     blurActiveElement();
     return;
   }
@@ -865,6 +905,21 @@ function handleKeydown(event: KeyboardEvent) {
     return;
   }
 
+  if (isAppCenterOpen.value) {
+    if (isEditableTarget(event.target)) return;
+    if (event.key === "Escape") {
+      if (document.querySelector(".mfa-context-menu, .mfa-editor-open")) return;
+      event.preventDefault();
+      isAppCenterOpen.value = false;
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      focusSearch();
+    }
+    return;
+  }
+
   if (isQuickPreviewModifierKey(event)) {
     isQuickPreviewKeyDown.value = true;
     suppressQuickPreviewUntilModifierUp = false;
@@ -928,6 +983,15 @@ function handlePanelKey(key: string) {
   if (showStarPrompt.value && key === "Escape") {
     hideStarSupport();
     return true;
+  }
+
+  if (isAppCenterOpen.value) {
+    if (appCenterElement.value?.handleNativePanelKey(key)) return true;
+    if (key === "Escape") {
+      isAppCenterOpen.value = false;
+      return true;
+    }
+    return false;
   }
 
   if (contextMenu.value) {
@@ -1219,9 +1283,10 @@ function scrollSelectedClipIntoView() {
     <section class="flex min-w-0 flex-1 flex-col">
       <div class="relative">
         <TopBar
-          v-model="store.search"
+          v-model="panelSearch"
           :shortcut="formattedShortcut"
           :settings-open="false"
+          :app-center-open="isAppCenterOpen"
           :append-copy-enabled="store.isAppendCopyEnabled"
           :append-copy-timeout-minutes="store.appendCopyTimeoutMinutes"
           :has-update="updater.hasAvailableUpdate.value"
@@ -1229,6 +1294,7 @@ function scrollSelectedClipIntoView() {
           :update-progress="updater.updateProgressPercent.value"
           :update-label="updater.updateButtonText.value"
           @toggle-settings="store.showSettings"
+          @toggle-app-center="toggleAppCenter"
           @toggle-append-copy="store.toggleAppendCopy"
           @open-update="updater.openUpdateDialog"
           @close="hidePanelFromUi"
@@ -1268,6 +1334,7 @@ function scrollSelectedClipIntoView() {
         :class="{ 'main-content-side': isSideLayout, 'main-content-single-column': isSingleColumn }"
       >
         <CategoryRail
+          v-if="!isAppCenterOpen"
           ref="categoryRailElement"
           :categories="store.categories"
           :selected-category-id="store.selectedCategoryId"
@@ -1286,7 +1353,9 @@ function scrollSelectedClipIntoView() {
           @reorder="reorderCategories"
         />
 
-        <section class="clip-area">
+        <AppCenterView v-if="isAppCenterOpen" ref="appCenterElement" :search="appCenterSearch" @clear-search="appCenterSearch = ''" />
+
+        <section v-else class="clip-area">
           <div v-if="store.error" class="mx-4 mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             <AlertCircle class="size-4" />
             <span class="min-w-0 flex-1 truncate">{{ store.error }}</span>

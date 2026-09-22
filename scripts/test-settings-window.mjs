@@ -6,10 +6,16 @@ import { createRequire } from "node:module";
 import { runInThisContext } from "node:vm";
 
 // Exercise the actual settings template without launching a browser or native window.
-globalThis.window = { __TAURI_INTERNALS__: {}, location: { search: "" }, addEventListener() {}, removeEventListener() {} };
+const keyListeners = new Map();
+globalThis.window = {
+  __TAURI_INTERNALS__: {}, location: { search: "" },
+  addEventListener(name, handler) { keyListeners.set(name, handler); },
+  removeEventListener(name, handler) { if (keyListeners.get(name) === handler) keyListeners.delete(name); },
+};
 globalThis.document = { activeElement: null, createElement() { return {}; }, addEventListener() {}, removeEventListener() {} };
 Object.defineProperty(globalThis, "navigator", { configurable: true, value: { platform: "Win32", userAgent: "Windows" } });
 globalThis.__settingsTest = {};
+globalThis.__settingsTest.keyListeners = keyListeners;
 
 const stubs = {
   store: "export const useIpasteStore = () => globalThis.__settingsTest.store;",
@@ -54,6 +60,7 @@ const routes = [
 const result = await build({
   entryPoints: ["tests/settingsWindow.test.ts"], bundle: true, write: false,
   platform: "node", format: "cjs",
+  define: { "import.meta.url": JSON.stringify(new URL("../src/components/SettingsWindow.vue", import.meta.url).href) },
   plugins: [{ name: "settings-test", setup(builder) {
     builder.onResolve({ filter: /.*/ }, ({ path: source }) => {
       const route = routes.find(([pattern]) => pattern.test(source));

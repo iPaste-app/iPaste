@@ -49,6 +49,33 @@ export type PanelOpenBehavior = "history" | "last_selected";
 export type PanelLayout = "top" | "side";
 export type OcrMode = "fast" | "best";
 export type Language = "en" | "zh-CN" | "ja" | "ko" | "es" | "fr" | "de";
+export type MfaAlgorithm = "SHA1" | "SHA256" | "SHA512";
+
+export type MfaAccount = {
+  id: string;
+  name: string;
+  issuer?: string | null;
+  description?: string | null;
+  secret: string;
+  algorithm: MfaAlgorithm;
+  digits: number;
+  period: number;
+  sourceUri?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt?: string | null;
+};
+
+export type MfaAccountInput = {
+  name: string;
+  issuer?: string | null;
+  description?: string | null;
+  secret: string;
+  algorithm?: MfaAlgorithm;
+  digits?: number;
+  period?: number;
+  sourceUri?: string | null;
+};
 
 export type AppSnapshot = {
   clips: ClipItem[];
@@ -71,6 +98,7 @@ export type ClipPage = {
 
 export type AppSettings = {
   shortcut: string;
+  appCenterShortcut: string;
   retentionDays: number;
   appendCopyTimeoutMinutes: number;
   panelOpenBehavior: PanelOpenBehavior;

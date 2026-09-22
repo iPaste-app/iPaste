@@ -14,6 +14,8 @@ import type {
   ClipViewItem,
   ImageOcrResult,
   Language,
+  MfaAccount,
+  MfaAccountInput,
   OcrMode,
   OcrInstallStatus,
   StarPromptState,
@@ -127,6 +129,8 @@ const mockCategoryItems: CategoryItem[] = [
   },
 ];
 
+const mockMfaAccounts: MfaAccount[] = [];
+
 const mockSnapshot: AppSnapshot = {
   clips: mockClips,
   hasMoreClips: false,
@@ -138,6 +142,7 @@ const mockSnapshot: AppSnapshot = {
   isAppendCopyEnabled: false,
   settings: {
     shortcut: "CommandOrControl+Shift+V",
+    appCenterShortcut: "CommandOrControl+Shift+A",
     retentionDays: 30,
     appendCopyTimeoutMinutes: 1,
     panelOpenBehavior: "history",
@@ -306,6 +311,71 @@ export const ipasteApi = {
   removeCategoryItem(id: string) {
     return call<void>("remove_category_item", { id });
   },
+  listMfaAccounts() {
+    return call<MfaAccount[]>("list_mfa_accounts", undefined, mockMfaAccounts);
+  },
+  createMfaAccount(input: MfaAccountInput) {
+    if (!isTauri) {
+      const timestamp = new Date().toISOString();
+      const account: MfaAccount = {
+        id: crypto.randomUUID(),
+        name: input.name.trim(),
+        issuer: input.issuer?.trim() || null,
+        description: input.description?.trim() || null,
+        secret: input.secret.replace(/[\s=-]/g, "").toUpperCase(),
+        algorithm: input.algorithm ?? "SHA1",
+        digits: input.digits ?? 6,
+        period: input.period ?? 30,
+        sourceUri: input.sourceUri ?? null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        lastUsedAt: null,
+      };
+      mockMfaAccounts.unshift(account);
+      return Promise.resolve(structuredClone(account));
+    }
+    return invoke<MfaAccount>("create_mfa_account", { input });
+  },
+  updateMfaAccount(id: string, input: MfaAccountInput) {
+    if (!isTauri) {
+      const index = mockMfaAccounts.findIndex((account) => account.id === id);
+      if (index < 0) return Promise.reject(new Error("MFA account not found"));
+      mockMfaAccounts[index] = {
+        ...mockMfaAccounts[index],
+        name: input.name.trim(),
+        issuer: input.issuer?.trim() || null,
+        description: input.description?.trim() || null,
+        secret: input.secret.replace(/[\s=-]/g, "").toUpperCase(),
+        algorithm: input.algorithm ?? "SHA1",
+        digits: input.digits ?? 6,
+        period: input.period ?? 30,
+        sourceUri: input.sourceUri ?? null,
+        updatedAt: new Date().toISOString(),
+      };
+      return Promise.resolve(structuredClone(mockMfaAccounts[index]));
+    }
+    return invoke<MfaAccount>("update_mfa_account", { id, input });
+  },
+  deleteMfaAccount(id: string) {
+    if (!isTauri) {
+      const index = mockMfaAccounts.findIndex((account) => account.id === id);
+      if (index >= 0) mockMfaAccounts.splice(index, 1);
+      return Promise.resolve();
+    }
+    return invoke<void>("delete_mfa_account", { id });
+  },
+  touchMfaAccount(id: string) {
+    if (!isTauri) {
+      const index = mockMfaAccounts.findIndex((account) => account.id === id);
+      if (index < 0) return Promise.reject(new Error("MFA account not found"));
+      mockMfaAccounts[index] = {
+        ...mockMfaAccounts[index],
+        lastUsedAt: new Date().toISOString(),
+      };
+      return Promise.resolve(structuredClone(mockMfaAccounts[index]));
+    }
+    return invoke<MfaAccount>("touch_mfa_account", { id });
+  },
   deleteClip(id: string) {
     return call<void>("delete_clip", { id });
   },
@@ -354,6 +424,12 @@ export const ipasteApi = {
     }
     return call<void>("copy_clip", { clipType, text });
   },
+  copyTextEphemeral(text: string) {
+    if (!isTauri && navigator.clipboard) {
+      return navigator.clipboard.writeText(text);
+    }
+    return call<void>("copy_text_ephemeral", { text });
+  },
   setListening(enabled: boolean) {
     return call<boolean>("set_listening", { enabled }, enabled);
   },
@@ -363,6 +439,7 @@ export const ipasteApi = {
   updateSettings(retentionDays: number) {
     return call<AppSettings>("update_settings", { retentionDays }, {
       shortcut: mockSnapshot.settings.shortcut,
+      appCenterShortcut: mockSnapshot.settings.appCenterShortcut,
       retentionDays,
       appendCopyTimeoutMinutes: mockSnapshot.settings.appendCopyTimeoutMinutes,
       panelOpenBehavior: mockSnapshot.settings.panelOpenBehavior,
@@ -406,6 +483,7 @@ export const ipasteApi = {
   updateAppendCopyTimeout(minutes: number) {
     return call<AppSettings>("update_append_copy_timeout", { minutes }, {
       shortcut: mockSnapshot.settings.shortcut,
+      appCenterShortcut: mockSnapshot.settings.appCenterShortcut,
       retentionDays: mockSnapshot.settings.retentionDays,
       appendCopyTimeoutMinutes: minutes,
       panelOpenBehavior: mockSnapshot.settings.panelOpenBehavior,
@@ -418,6 +496,20 @@ export const ipasteApi = {
   updateShortcut(shortcut: string) {
     return call<AppSettings>("update_shortcut", { shortcut }, {
       shortcut,
+      appCenterShortcut: mockSnapshot.settings.appCenterShortcut,
+      retentionDays: mockSnapshot.settings.retentionDays,
+      appendCopyTimeoutMinutes: mockSnapshot.settings.appendCopyTimeoutMinutes,
+      panelOpenBehavior: mockSnapshot.settings.panelOpenBehavior,
+      panelLayout: mockSnapshot.settings.panelLayout,
+      ocrMode: mockSnapshot.settings.ocrMode,
+      language: mockSnapshot.settings.language,
+      cloud: mockSnapshot.settings.cloud,
+    });
+  },
+  updateAppCenterShortcut(shortcut: string) {
+    return call<AppSettings>("update_app_center_shortcut", { shortcut }, {
+      shortcut: mockSnapshot.settings.shortcut,
+      appCenterShortcut: shortcut,
       retentionDays: mockSnapshot.settings.retentionDays,
       appendCopyTimeoutMinutes: mockSnapshot.settings.appendCopyTimeoutMinutes,
       panelOpenBehavior: mockSnapshot.settings.panelOpenBehavior,
@@ -433,6 +525,7 @@ export const ipasteApi = {
   updatePanelOpenBehavior(behavior: AppSettings["panelOpenBehavior"]) {
     return call<AppSettings>("update_panel_open_behavior", { behavior }, {
       shortcut: mockSnapshot.settings.shortcut,
+      appCenterShortcut: mockSnapshot.settings.appCenterShortcut,
       retentionDays: mockSnapshot.settings.retentionDays,
       appendCopyTimeoutMinutes: mockSnapshot.settings.appendCopyTimeoutMinutes,
       panelOpenBehavior: behavior,
@@ -445,6 +538,7 @@ export const ipasteApi = {
   updatePanelLayout(layout: AppSettings["panelLayout"]) {
     return call<AppSettings>("update_panel_layout", { layout }, {
       shortcut: mockSnapshot.settings.shortcut,
+      appCenterShortcut: mockSnapshot.settings.appCenterShortcut,
       retentionDays: mockSnapshot.settings.retentionDays,
       appendCopyTimeoutMinutes: mockSnapshot.settings.appendCopyTimeoutMinutes,
       panelOpenBehavior: mockSnapshot.settings.panelOpenBehavior,
@@ -457,6 +551,7 @@ export const ipasteApi = {
   updateOcrMode(mode: OcrMode) {
     return call<AppSettings>("update_ocr_mode", { mode }, {
       shortcut: mockSnapshot.settings.shortcut,
+      appCenterShortcut: mockSnapshot.settings.appCenterShortcut,
       retentionDays: mockSnapshot.settings.retentionDays,
       appendCopyTimeoutMinutes: mockSnapshot.settings.appendCopyTimeoutMinutes,
       panelOpenBehavior: mockSnapshot.settings.panelOpenBehavior,
@@ -469,6 +564,7 @@ export const ipasteApi = {
   updateLanguage(language: Language) {
     return call<AppSettings>("update_language", { language }, {
       shortcut: mockSnapshot.settings.shortcut,
+      appCenterShortcut: mockSnapshot.settings.appCenterShortcut,
       retentionDays: mockSnapshot.settings.retentionDays,
       appendCopyTimeoutMinutes: mockSnapshot.settings.appendCopyTimeoutMinutes,
       panelOpenBehavior: mockSnapshot.settings.panelOpenBehavior,
@@ -481,6 +577,7 @@ export const ipasteApi = {
   updateCloudSettings(apiAddress: string, apiKey: string) {
     return call<AppSettings>("update_cloud_settings", { apiAddress, apiKey }, {
       shortcut: mockSnapshot.settings.shortcut,
+      appCenterShortcut: mockSnapshot.settings.appCenterShortcut,
       retentionDays: 30,
       appendCopyTimeoutMinutes: mockSnapshot.settings.appendCopyTimeoutMinutes,
       panelOpenBehavior: mockSnapshot.settings.panelOpenBehavior,
@@ -498,6 +595,7 @@ export const ipasteApi = {
   disableCloudSync() {
     return call<AppSettings>("disable_cloud_sync", undefined, {
       shortcut: mockSnapshot.settings.shortcut,
+      appCenterShortcut: mockSnapshot.settings.appCenterShortcut,
       retentionDays: 30,
       appendCopyTimeoutMinutes: mockSnapshot.settings.appendCopyTimeoutMinutes,
       panelOpenBehavior: mockSnapshot.settings.panelOpenBehavior,
@@ -565,6 +663,9 @@ export const ipasteApi = {
       words: [],
     });
   },
+  readClipImageDataUrl(imagePath: string) {
+    return call<string>("read_clip_image_data_url", { imagePath }, imagePath);
+  },
   showPanel() {
     return call<void>("show_panel");
   },
@@ -585,6 +686,9 @@ export const ipasteApi = {
   },
   applyClip(id: string, clipType: string, text: string) {
     return call<void>("apply_clip", { id, clipType, text });
+  },
+  applyTextEphemeral(text: string) {
+    return call<void>("apply_text_ephemeral", { text });
   },
   closeClipViewer(label: string) {
     return call<void>("close_clip_viewer", { label });
