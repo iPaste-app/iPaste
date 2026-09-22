@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ClipboardPlus, Download, Search, Settings, X } from "lucide-vue-next";
+import { ClipboardPlus, Download, Grid2X2, Search, Settings, X } from "lucide-vue-next";
 import { t } from "../i18n";
 import DownloadProgressBorder from "./DownloadProgressBorder.vue";
 
@@ -11,6 +11,7 @@ const props = defineProps<{
   modelValue: string;
   shortcut: string;
   settingsOpen: boolean;
+  appCenterOpen: boolean;
   appendCopyEnabled: boolean;
   appendCopyTimeoutMinutes: number;
   hasUpdate?: boolean;
@@ -23,6 +24,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   "update:modelValue": [value: string];
   toggleSettings: [];
+  toggleAppCenter: [];
   toggleAppendCopy: [];
   openUpdate: [];
   close: [];
@@ -121,6 +123,19 @@ function startMainWindowDrag() {
         :progress="updateProgress ?? null"
         :label="updateLabel ?? t('update.button.downloading')"
       />
+    </button>
+
+    <button
+      type="button"
+      class="icon-button app-center-button"
+      :class="{ 'app-center-button-active': appCenterOpen }"
+      tabindex="-1"
+      :aria-pressed="appCenterOpen"
+      :aria-label="t('appCenter.toggle')"
+      :data-tooltip="t('appCenter.toggle')"
+      @click.stop="emit('toggleAppCenter')"
+    >
+      <Grid2X2 class="size-4" />
     </button>
 
     <button

@@ -84,6 +84,50 @@ function ocrFixture() {
   };
 }
 
+test("application center shortcut records and saves independently, restoring native shortcuts", async () => {
+  const f = fixture();
+  try {
+    f.preferences.resolve();
+    await flush();
+    await f.select("shortcuts");
+    const section = all(f.root, el => el.tag === "section" && hasClass(el, "settings-shortcuts-item") && text(el).includes("settings.shortcuts.appCenter.title"))[0];
+    await all(section, el => hasClass(el, "shortcut-capture-button"))[0].props.onClick();
+    assert.deepEqual(state.shortcutToggles, [false]);
+    state.keyListeners.get("keydown")({
+      key: "m", code: "KeyM", ctrlKey: true, shiftKey: true, altKey: false, metaKey: false,
+      preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {},
+    });
+    await flush();
+    assert.deepEqual(state.shortcutToggles, [false, true]);
+    assert.equal(state.keyListeners.has("keydown"), false);
+    await button(section, "common.save").props.onClick();
+    await nextTick();
+    assert.deepEqual(state.shortcutWrites, [["appCenter", "Control+Shift+M"]]);
+    assert.equal(state.store.shortcut, "CommandOrControl+Shift+V");
+    assert.ok(text(section).includes("settings.shortcuts.saved"));
+  } finally { f.preferences.resolve(); f.app.unmount(); }
+});
+
+test("application center rejects the panel shortcut even when modifier aliases differ", async () => {
+  const f = fixture();
+  try {
+    f.preferences.resolve();
+    await flush();
+    await f.select("shortcuts");
+    const section = all(f.root, el => el.tag === "section" && hasClass(el, "settings-shortcuts-item") && text(el).includes("settings.shortcuts.appCenter.title"))[0];
+    await all(section, el => hasClass(el, "shortcut-capture-button"))[0].props.onClick();
+    state.keyListeners.get("keydown")({
+      key: "v", code: "KeyV", ctrlKey: true, shiftKey: true, altKey: false, metaKey: false,
+      preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {},
+    });
+    await flush();
+    assert.equal(button(section, "common.save").props.disabled, true);
+    assert.ok(text(section).includes("settings.shortcuts.duplicate"));
+    assert.deepEqual(state.shortcutWrites, []);
+    assert.deepEqual(state.shortcutToggles, [false, true]);
+  } finally { f.preferences.resolve(); f.app.unmount(); }
+});
+
 function fixture(options: { initialTab?: "ocr"; queuedTarget?: "ocr" } = {}) {
   const preferences = deferred(), autostart = deferred<boolean>();
   let preferenceReads = 0, autostartReads = 0, snapshotReads = 0;
@@ -97,8 +141,11 @@ function fixture(options: { initialTab?: "ocr"; queuedTarget?: "ocr" } = {}) {
     return () => { if (state.settingsListener === listener) state.settingsListener = null; };
   };
   state.writes = 0;
+  state.shortcutToggles = [];
+  state.shortcutWrites = [];
   state.readAutostart = () => { autostartReads++; return autostart.promise; };
   state.api = {
+    async setAppShortcutEnabled(enabled) { state.shortcutToggles.push(enabled); },
     async appInfo() { return { version: "test" }; },
     async takeSettingsTarget() {
       const target = state.settingsTarget;
@@ -110,6 +157,9 @@ function fixture(options: { initialTab?: "ocr"; queuedTarget?: "ocr" } = {}) {
     language: "en", retentionDays: 30, appendCopyTimeoutMinutes: 1,
     panelOpenBehavior: "history", panelLayout: "top", ocrMode: "fast",
     shortcut: "CommandOrControl+Shift+V", cloud: { enabled: false, apiAddress: "", apiKey: "" },
+    appCenterShortcut: "CommandOrControl+Shift+A",
+    async updateShortcut(value) { state.shortcutWrites.push(["panel", value]); this.shortcut = value; },
+    async updateAppCenterShortcut(value) { state.shortcutWrites.push(["appCenter", value]); this.appCenterShortcut = value; },
     async loadSettings() { preferenceReads++; await preferences.promise; },
     async load() { snapshotReads++; },
   });
