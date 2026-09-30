@@ -34,7 +34,7 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1.52.3", features = ["rt-multi-thread"] }
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "sync"] }
 uuid = { version = "1", features = ["v4"] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
@@ -42,10 +42,40 @@ tauri-plugin-process = "2"
 [target.'cfg(windows)'.dependencies]
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["load-dynamic"] }
 rapidocr-core = { version = "=0.2.2", default-features = false }
-windows-sys = { version = "0.61.2", features = ["Win32_System_DataExchange"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Graphics_Gdi", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "libc", "NSApplication", "NSEvent", "NSGraphics", "NSPanel", "NSPasteboard", "NSResponder", "NSRunningApplication", "NSView", "NSWindow", "NSWorkspace"] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFCGTypes", "objc2"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSError", "NSGeometry", "NSRange", "NSString", "NSURL", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSData", "NSError", "NSGeometry", "NSRange", "NSString", "NSURL", "objc2-core-foundation"] }
+
+# Image decoding/encoding and pixel loops run on every paste. Keep local Tauri
+# development responsive without dropping debug symbols or optimizing all UI dependencies.
+[profile.dev.package.ipaste]
+opt-level = 2
+
+# Keep native timing regressions representative of the development app.
+[profile.test.package.ipaste]
+opt-level = 2
+
+[profile.dev.package.image]
+opt-level = 3
+
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+
+[profile.dev.package.png]
+opt-level = 3
+
+[profile.dev.package.fdeflate]
+opt-level = 3
+
+[profile.dev.package.simd-adler32]
+opt-level = 3
+
+[profile.dev.package.crc32fast]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3

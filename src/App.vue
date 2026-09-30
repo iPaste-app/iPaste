@@ -2,7 +2,7 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import { AlertCircle, CheckCircle2, ChevronRight, ClipboardCopy, CornerDownLeft, FolderInput, Inbox, Pencil, Plus, Trash2, X } from "lucide-vue-next";
+import { AlertCircle, CheckCircle2, ChevronRight, ClipboardCopy, CornerDownLeft, FolderInput, Inbox, Pencil, Plus, TextCursorInput, Trash2, X } from "lucide-vue-next";
 import AppCenterView from "./components/AppCenterView.vue";
 import CategoryRail from "./components/CategoryRail.vue";
 import ClipCard from "./components/ClipCard.vue";
@@ -15,8 +15,14 @@ import UpdateDialog from "./components/UpdateDialog.vue";
 import { useUpdater } from "./composables/useUpdater";
 import { usePanelViewport } from "./composables/usePanelViewport";
 import { useElementWidth } from "./composables/useElementWidth";
+import {
+  refreshFileReferencePreviews,
+  setFileReferencePreviewSurfaceVisible,
+  useFileReferencePreview,
+} from "./composables/useFileReferencePreview";
 import { cleanLanguage, setLanguage, t } from "./i18n";
 import { clipImageSrc } from "./lib/clipMedia";
+import { clipFileName, fileIconSrc } from "./lib/clipFile";
 import { categoryDisplayName, clipMetricText, formatShortcut, formatTime, typeLabel } from "./lib/format";
 import { ipasteApi } from "./lib/ipasteApi";
 import { clipColumnCount, selectionDelta, submenuPlacement } from "./lib/panelLayout";
@@ -153,12 +159,12 @@ const isQuickPreviewLocked = computed(() => isQuickPreviewPinned.value);
 const quickPreviewTitle = computed(() => {
   const item = quickPreviewItem.value;
   if (!item) return "";
-  return item.displayName?.trim() || "";
+  return item.displayName?.trim() || (item.clipType === "file" ? clipFileName(item.text) : "");
 });
 const quickPreviewAriaLabel = computed(() => {
   const item = quickPreviewItem.value;
   if (!item) return "";
-  return item.displayName?.trim() || t("clip.clipboardTitle", { type: typeLabel(item.clipType) });
+  return item.displayName?.trim() || (item.clipType === "file" ? clipFileName(item.text) : t("clip.clipboardTitle", { type: typeLabel(item.clipType) }));
 });
 const quickPreviewContent = computed(() => quickPreviewItem.value?.text || quickPreviewItem.value?.previewText || "");
 const quickPreviewImageSrc = computed(() => quickPreviewItem.value ? clipImageSrc(quickPreviewItem.value) : "");
@@ -167,10 +173,18 @@ const quickPreviewTime = computed(() => {
   if (!item) return "";
   return item.collection === "history" ? item.lastCapturedAt : item.createdAt;
 });
+const quickPreviewFile = useFileReferencePreview(
+  () => quickPreviewItem.value?.clipType === "file" ? quickPreviewItem.value.text : null,
+  () => {
+    const item = quickPreviewItem.value;
+    if (!item) return "";
+    return item.collection === "history" ? item.lastCapturedAt : item.updatedAt;
+  },
+);
 const quickPreviewSize = computed(() => {
   const item = quickPreviewItem.value;
   if (!item) return "";
-  return clipMetricText(item.clipType, item.text, item.previewText);
+  return clipMetricText(item.clipType, item.text, item.previewText, quickPreviewFile.size.value);
 });
 const quickPreviewColorValue = computed(() => quickPreviewContent.value.trim());
 
@@ -185,6 +199,7 @@ function handlePanelShortcutOpened() {
   isAppCenterOpen.value = false;
   closeFloatingLayers();
   scheduleClipListScrollReset();
+  refreshFileReferencePreviews();
 }
 
 function handleAppCenterShortcutOpened() {
@@ -287,6 +302,7 @@ function applyPanelVisibility(
   activateDefault = false,
 ) {
   isPanelVisible = payload.visible;
+  setFileReferencePreviewSurfaceVisible(payload.visible);
   closeFloatingLayers();
   const nativePanel = payload.visible && Boolean(payload.nativePanel);
   isPreservingCurrentApp.value = payload.visible && payload.preservesCurrentApp && !nativePanel;
@@ -314,6 +330,7 @@ function applyPanelVisibility(
     scheduleActiveElementBlur();
   }
   blurCategoryFocus();
+  refreshFileReferencePreviews();
   scheduleSilentUpdateCheck();
   scheduleStarPromptForPanelOpen();
 }
@@ -497,6 +514,30 @@ async function copyContextItem() {
   closeFloatingLayers();
   if (!item) return;
   await store.copyItem(item);
+}
+
+async function copyContextFilePath() {
+  const item = contextMenu.value?.item;
+  closeFloatingLayers();
+  if (item?.clipType !== "file") return;
+  store.error = null;
+  try {
+    await ipasteApi.copyTextEphemeral(item.text);
+  } catch (error) {
+    store.error = String(error);
+  }
+}
+
+async function pasteContextFilePath() {
+  const item = contextMenu.value?.item;
+  closeFloatingLayers();
+  if (item?.clipType !== "file") return;
+  store.error = null;
+  try {
+    await ipasteApi.applyTextEphemeral(item.text);
+  } catch (error) {
+    store.error = String(error);
+  }
 }
 
 async function renameContextItem() {
@@ -761,10 +802,16 @@ async function copyQuickPreviewItem() {
   const item = quickPreviewItem.value;
   if (!item) return;
   await store.copyItem(item);
+  if (store.error) closeQuickPreview();
 }
 
 async function pasteQuickPreviewSelection() {
   const item = quickPreviewItem.value;
+  if (item?.clipType === "file") {
+    await store.applyItem(item);
+    closeQuickPreview();
+    return;
+  }
   const selectedText = quickPreviewSelectedText.value.trim();
   if (!item || !selectedText) return;
 
@@ -773,7 +820,7 @@ async function pasteQuickPreviewSelection() {
 }
 
 function handleSelectionChange() {
-  if (!quickPreviewItem.value) {
+  if (!quickPreviewItem.value || quickPreviewItem.value.clipType === "file") {
     quickPreviewSelectedText.value = "";
     return;
   }
@@ -1094,6 +1141,7 @@ function handleVisibilityChange() {
   if (document.hidden) {
     closeFloatingLayers();
   } else {
+    refreshFileReferencePreviews();
     scheduleSilentUpdateCheck();
   }
 }
@@ -1444,15 +1492,15 @@ function scrollSelectedClipIntoView() {
               <button
                 type="button"
                 class="quick-preview-action-button"
-                :disabled="!quickPreviewSelectedText.trim()"
+                :disabled="quickPreviewItem.clipType !== 'file' && !quickPreviewSelectedText.trim()"
                 tabindex="-1"
-                :aria-label="t('common.paste')"
-                :data-tooltip="t('common.paste')"
+                :aria-label="t(quickPreviewItem.clipType === 'file' ? 'file.pasteFile' : 'common.paste')"
+                :data-tooltip="t(quickPreviewItem.clipType === 'file' ? 'file.pasteFile' : 'common.paste')"
                 @pointerdown.stop
                 @click.stop="pasteQuickPreviewSelection"
               >
                 <CornerDownLeft class="size-3.5" />
-                <span>{{ t("common.paste") }}</span>
+                <span>{{ t(quickPreviewItem.clipType === 'file' ? 'file.pasteFile' : 'common.paste') }}</span>
               </button>
               <button
                 type="button"
@@ -1487,6 +1535,30 @@ function scrollSelectedClipIntoView() {
               <code>{{ quickPreviewContent }}</code>
             </div>
 
+            <div v-else-if="quickPreviewItem.clipType === 'file'" class="quick-preview-file">
+              <img
+                v-if="quickPreviewFile.thumbnailSrc.value"
+                :src="quickPreviewFile.thumbnailSrc.value"
+                class="quick-preview-file-thumbnail"
+                :alt="quickPreviewTitle"
+                draggable="false"
+              />
+              <img
+                v-else
+                :src="fileIconSrc(quickPreviewItem.text)"
+                class="h-12 w-10 shrink-0 object-contain"
+                alt=""
+                aria-hidden="true"
+                draggable="false"
+              />
+              <div class="min-w-0">
+                <div class="select-text break-all text-sm text-slate-600" :aria-label="t('file.path')">{{ quickPreviewItem.text }}</div>
+                <p v-if="quickPreviewFile.error.value" class="quick-preview-file-error" role="status">
+                  {{ quickPreviewFile.error.value }}
+                </p>
+              </div>
+            </div>
+
             <div v-else class="quick-preview-text">{{ quickPreviewContent }}</div>
           </div>
         </section>
@@ -1506,11 +1578,19 @@ function scrollSelectedClipIntoView() {
     >
       <button type="button" class="context-menu-item context-menu-item-strong" tabindex="-1" role="menuitem" @click="pasteContextItem">
         <CornerDownLeft class="size-4" />
-        <span>{{ t("common.paste") }}</span>
+        <span>{{ t(contextMenu.item.clipType === 'file' ? "file.pasteFile" : "common.paste") }}</span>
       </button>
       <button type="button" class="context-menu-item" tabindex="-1" role="menuitem" @click="copyContextItem">
         <ClipboardCopy class="size-4" />
         <span>{{ t("common.copy") }}</span>
+      </button>
+      <button v-if="contextMenu.item.clipType === 'file'" type="button" class="context-menu-item" tabindex="-1" role="menuitem" @click="copyContextFilePath">
+        <TextCursorInput class="size-4" />
+        <span>{{ t("file.copyPath") }}</span>
+      </button>
+      <button v-if="contextMenu.item.clipType === 'file'" type="button" class="context-menu-item" tabindex="-1" role="menuitem" @click="pasteContextFilePath">
+        <CornerDownLeft class="size-4" />
+        <span>{{ t("file.pastePath") }}</span>
       </button>
       <div class="context-menu-separator" />
       <button

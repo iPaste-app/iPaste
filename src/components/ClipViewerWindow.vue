@@ -21,6 +21,8 @@ import {
   ZoomOut,
 } from "lucide-vue-next";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { useFileReferencePreview } from "../composables/useFileReferencePreview";
+import { clipFileName, fileIconSrc } from "../lib/clipFile";
 import { clipImageSrc } from "../lib/clipMedia";
 import OcrSetupGuide from "./OcrSetupGuide.vue";
 import { getOcrErrorMessage, getOcrModelIssue, type OcrModelIssue } from "../lib/ocrError";
@@ -110,19 +112,32 @@ const IMAGE_MAX_SCALE = 8;
 const IMAGE_ZOOM_STEP = 1.2;
 
 const item = computed(() => payload.value?.item);
+const isImage = computed(() => item.value?.clipType === "image");
+const isFile = computed(() => item.value?.clipType === "file");
+const fileArtworkSrc = computed(() => fileIconSrc(item.value?.text ?? ""));
+const filePreview = useFileReferencePreview(
+  () => isFile.value ? item.value?.text ?? null : null,
+  () => {
+    const current = item.value;
+    if (!current) return "";
+    return current.collection === "history" ? current.lastCapturedAt : current.updatedAt;
+  },
+);
 const title = computed(() => {
   const current = item.value;
   if (!current) return t("viewer.titleFallback");
+  if (current.clipType === "file") return clipFileName(current.text) || typeLabel(current.clipType);
   return current.displayName?.trim() || t("clip.clipboardTitle", { type: typeLabel(current.clipType) });
 });
-const isImage = computed(() => item.value?.clipType === "image");
 const imageSrc = computed(() => (item.value ? clipImageSrc(item.value) : ""));
 const showImageOcrPanel = computed(() => isImage.value && (
   isRecognizingImage.value || Boolean(imageOcrResult.value) || Boolean(imageOcrError.value) || Boolean(imageOcrIssue.value)
 ));
-const hasChanged = computed(() => Boolean(item.value && draftText.value !== item.value.text));
-const stats = computed(() => (item.value ? textStats(draftText.value) : ""));
-const metricText = computed(() => (item.value ? clipMetricText(item.value.clipType, draftText.value, item.value.previewText) : ""));
+const hasChanged = computed(() => Boolean(item.value && !isFile.value && draftText.value !== item.value.text));
+const stats = computed(() => (item.value && !isFile.value ? textStats(draftText.value) : ""));
+const metricText = computed(() => (item.value
+  ? clipMetricText(item.value.clipType, draftText.value, item.value.previewText, filePreview.size.value)
+  : ""));
 const lines = computed(() => draftText.value.split(/\r?\n/).length);
 const normalizedImageRotation = computed(() => ((imageRotation.value % 360) + 360) % 360);
 const isImageRotatedSideways = computed(() => normalizedImageRotation.value === 90 || normalizedImageRotation.value === 270);
@@ -333,6 +348,8 @@ function loadPayload() {
 }
 
 function focusEditorAtStart() {
+  if (isFile.value) return;
+
   const editor = editorElement.value;
   if (!editor) return;
 
@@ -375,7 +392,7 @@ function cancelClose() {
 }
 
 async function saveAndClose() {
-  if (!hasChanged.value) {
+  if (isFile.value || !hasChanged.value) {
     await forceCloseWindow();
     return;
   }
@@ -455,13 +472,13 @@ function handleViewerKeydown(event: KeyboardEvent) {
 }
 
 function resetDraft() {
-  if (!item.value) return;
+  if (!item.value || isFile.value) return;
   draftText.value = item.value.text;
   hideSelectionAction();
 }
 
 async function applyChanges() {
-  if (!item.value || !hasChanged.value) return;
+  if (!item.value || isFile.value || !hasChanged.value) return;
 
   try {
     const next = await ipasteApi.updateClipContent(item.value.id, item.value.collection, draftText.value);
@@ -486,11 +503,17 @@ async function applyChanges() {
 
 async function pasteDraft() {
   if (!payload.value || !item.value) return;
-  await pasteFromViewer(draftText.value);
+  await pasteFromViewer(isFile.value ? item.value.text : draftText.value);
 }
 
 async function pasteSelection() {
   if (!payload.value || !item.value || !selectionAction.value?.text) return;
+  if (isFile.value) {
+    hideSelectionAction();
+    await pasteFromViewer(item.value.text);
+    return;
+  }
+
   const selectedText = selectionAction.value.text;
   const mode = selectionAction.value.mode;
   hideSelectionAction();
@@ -503,6 +526,7 @@ async function pasteSelection() {
 
 async function pasteFromViewer(text: string) {
   if (!payload.value || !item.value) return;
+  const content = isFile.value ? item.value.text : text;
 
   const viewerWindow = isTauri ? getCurrentWindow() : null;
   if (viewerWindow) {
@@ -510,13 +534,27 @@ async function pasteFromViewer(text: string) {
   }
 
   try {
-    await ipasteApi.applyClip(payload.value.originalClipId, item.value.clipType, text);
+    error.value = null;
+    await ipasteApi.applyClip(payload.value.originalClipId, item.value.clipType, content);
+  } catch (unknownError) {
+    error.value = String(unknownError);
   } finally {
     if (viewerWindow) {
       await viewerWindow.show();
       await viewerWindow.setAlwaysOnTop(isPinned.value);
       await viewerWindow.setFocus();
     }
+  }
+}
+
+async function copyFilePath() {
+  if (!item.value || !isFile.value) return;
+
+  try {
+    error.value = null;
+    await ipasteApi.copyTextEphemeral(item.value.text);
+  } catch (unknownError) {
+    error.value = String(unknownError);
   }
 }
 
@@ -527,6 +565,11 @@ function scheduleSelectionAction() {
 
 function updateSelectionAction() {
   selectionTimer = null;
+  if (isFile.value) {
+    hideSelectionAction();
+    return;
+  }
+
   if (isImage.value && imageOcrSelectionText.value.trim()) {
     updateImageOcrSelectionAction();
     return;
@@ -1157,7 +1200,10 @@ function clamp(value: number, min: number, max: number) {
       </button>
 
       <div class="clip-viewer-drag-zone min-w-0 flex-1" @mousedown="startWindowDrag">
-        <h1 class="truncate text-base font-semibold text-slate-950">{{ title }}</h1>
+        <div class="flex min-w-0 items-center gap-2">
+          <img v-if="isFile" :src="fileArtworkSrc" class="h-5 w-4 shrink-0 object-contain" alt="" aria-hidden="true" draggable="false" />
+          <h1 class="truncate text-base font-semibold text-slate-950">{{ title }}</h1>
+        </div>
         <p v-if="item" class="truncate text-xs text-slate-500">
           {{ typeLabel(item.clipType) }} · {{ formatTime(displayTime) }}
         </p>
@@ -1227,7 +1273,7 @@ function clamp(value: number, min: number, max: number) {
       </div>
 
       <button
-        v-if="!isImage"
+        v-if="!isImage && !isFile"
         type="button"
         class="viewer-action-button"
         :disabled="!hasChanged"
@@ -1238,7 +1284,7 @@ function clamp(value: number, min: number, max: number) {
       </button>
 
       <button
-        v-if="!isImage"
+        v-if="!isImage && !isFile"
         type="button"
         class="viewer-action-button viewer-action-button-primary"
         :disabled="!hasChanged"
@@ -1397,6 +1443,30 @@ function clamp(value: number, min: number, max: number) {
         </div>
       </template>
 
+      <div v-else-if="isFile" class="flex min-w-0 flex-1 flex-col gap-2">
+        <div v-if="filePreview.thumbnailSrc.value" class="min-h-0 flex-1 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 p-2">
+          <img
+            :src="filePreview.thumbnailSrc.value"
+            class="h-full max-h-[320px] w-full object-contain"
+            :alt="title"
+            draggable="false"
+          />
+        </div>
+        <p v-if="filePreview.error.value" class="text-xs leading-5 text-red-700" role="status">
+          {{ filePreview.error.value }}
+        </p>
+        <label class="text-xs font-medium text-slate-500" for="viewer-file-path">{{ t("file.path") }}</label>
+        <textarea
+          id="viewer-file-path"
+          class="viewer-editor subtle-scrollbar"
+          :value="item.text"
+          readonly
+          spellcheck="false"
+          :aria-label="t('file.path')"
+          data-file-reference
+        />
+      </div>
+
       <textarea
         v-else
         ref="editorElement"
@@ -1409,7 +1479,7 @@ function clamp(value: number, min: number, max: number) {
       />
 
       <button
-        v-if="selectionAction"
+        v-if="selectionAction && !isFile"
         type="button"
         class="selection-paste-button"
         :style="{ left: `${selectionAction.left}px`, top: `${selectionAction.top}px` }"
@@ -1423,12 +1493,32 @@ function clamp(value: number, min: number, max: number) {
     </section>
 
     <footer v-if="item" class="clip-viewer-footer">
-      <span>{{ isImage ? metricText : stats }}</span>
-      <span v-if="!isImage">{{ t("common.lineCount", { count: lines }) }}</span>
-      <button type="button" class="viewer-paste-button" @click="pasteDraft">
+      <template v-if="!isFile">
+        <span>{{ isImage ? metricText : stats }}</span>
+        <span v-if="!isImage">{{ t("common.lineCount", { count: lines }) }}</span>
+      </template>
+      <span v-else>{{ metricText }}</span>
+      <button
+        v-if="isFile"
+        type="button"
+        class="viewer-action-button"
+        :aria-label="t('file.copyPath')"
+        :data-tooltip="t('file.copyPath')"
+        @click="copyFilePath"
+      >
+        <Copy class="size-4" />
+        <span>{{ t("file.copyPath") }}</span>
+      </button>
+      <button
+        type="button"
+        class="viewer-paste-button"
+        :aria-label="isFile ? t('file.pasteFile') : undefined"
+        :data-tooltip="isFile ? t('file.pasteFile') : undefined"
+        @click="pasteDraft"
+      >
         <ImageIcon v-if="isImage" class="size-4" />
         <CornerDownLeft v-else class="size-4" />
-        <span>{{ isImage ? t("viewer.pasteImage") : t("viewer.pasteCurrent") }}</span>
+        <span>{{ isImage ? t("viewer.pasteImage") : isFile ? t("file.pasteFile") : t("viewer.pasteCurrent") }}</span>
       </button>
     </footer>
 

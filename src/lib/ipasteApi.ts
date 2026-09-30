@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import appPackage from "../../package.json";
+import { localizeFileError } from "./fileError";
 import { categoryOrderByIds, compareCategoryItemOrder, compareClipOrder } from "./clipOrder";
 import type {
   AppInfo,
@@ -12,6 +13,7 @@ import type {
   ClipPage,
   ClipViewerPayload,
   ClipViewItem,
+  FileReferencePreview,
   ImageOcrResult,
   Language,
   MfaAccount,
@@ -165,6 +167,14 @@ async function call<T>(command: string, args?: Record<string, unknown>, fallback
 }
 
 export const ipasteApi = {
+  fileReferencePreview(path: string): Promise<FileReferencePreview | null> {
+    return isTauri
+      ? invoke<FileReferencePreview>("file_reference_preview", { path }).catch(localizeFileError)
+      : Promise.resolve(null);
+  },
+  imageThumbnail(path: string): Promise<string> {
+    return isTauri ? invoke<string>("image_thumbnail", { path }) : Promise.resolve(path);
+  },
   settings() {
     return call<AppSettings>("get_app_settings", undefined, mockSnapshot.settings);
   },
@@ -412,17 +422,23 @@ export const ipasteApi = {
       collection === "history"
         ? mockClips.find((item) => item.id === id)
         : mockCategoryItems.find((item) => item.id === id);
+    if (!isTauri && fallback?.clipType === "file") {
+      return Promise.reject("FILE_READ_ONLY").catch(localizeFileError);
+    }
     return call<ClipItem | CategoryItem>(
       "update_clip_content",
       { id, collection, text },
       fallback ? { ...fallback, text, previewText: previewText(text) } : undefined,
-    );
+    ).catch(localizeFileError);
   },
   copyClip(clipType: string, text: string) {
+    if (!isTauri && clipType === "file") {
+      return Promise.reject("FILE_NATIVE_ONLY").catch(localizeFileError);
+    }
     if (!isTauri && navigator.clipboard && clipType !== "image") {
       return navigator.clipboard.writeText(text);
     }
-    return call<void>("copy_clip", { clipType, text });
+    return call<void>("copy_clip", { clipType, text }).catch(localizeFileError);
   },
   copyTextEphemeral(text: string) {
     if (!isTauri && navigator.clipboard) {
@@ -685,7 +701,10 @@ export const ipasteApi = {
     return call<void>("open_accessibility_settings");
   },
   applyClip(id: string, clipType: string, text: string) {
-    return call<void>("apply_clip", { id, clipType, text });
+    if (!isTauri && clipType === "file") {
+      return Promise.reject("FILE_NATIVE_ONLY").catch(localizeFileError);
+    }
+    return call<void>("apply_clip", { id, clipType, text }).catch(localizeFileError);
   },
   applyTextEphemeral(text: string) {
     return call<void>("apply_text_ephemeral", { text });

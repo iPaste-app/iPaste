@@ -466,7 +466,12 @@ export const useIpasteStore = defineStore("ipaste", () => {
   }
 
   async function copyItem(item: ClipViewItem) {
-    await ipasteApi.copyClip(item.clipType, item.text);
+    error.value = null;
+    try {
+      await ipasteApi.copyClip(item.clipType, item.text);
+    } catch (unknownError) {
+      error.value = String(unknownError);
+    }
   }
 
   async function setAppendCopyEnabled(enabled: boolean) {

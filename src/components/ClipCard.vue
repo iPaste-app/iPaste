@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import {
-  FileText,
+  File,
   Image,
   Link,
   Maximize2,
@@ -8,10 +8,13 @@ import {
   Type,
 } from "lucide-vue-next";
 import { computed } from "vue";
+import { useFileReferencePreview } from "../composables/useFileReferencePreview";
+import { useImageThumbnail } from "../composables/useImageThumbnail";
 import ContentPinIcon from "./ContentPinIcon.vue";
+import { clipFileName, fileIconCategory, fileIconSrc } from "../lib/clipFile";
 import { clipImageSrc } from "../lib/clipMedia";
 import { t } from "../i18n";
-import { categoryDisplayName, clipMetricText, formatTime, typeLabel } from "../lib/format";
+import { categoryDisplayName, clipMetricText, formatFileSize, formatTime, typeLabel } from "../lib/format";
 import type { Category, ClipViewItem } from "../types";
 
 const props = defineProps<{
@@ -36,12 +39,18 @@ const emit = defineEmits<{
 
 const isImage = computed(() => props.item.clipType === "image");
 const isColor = computed(() => props.item.clipType === "color");
-const imageSrc = computed(() => clipImageSrc(props.item));
+const isFile = computed(() => props.item.clipType === "file");
+const isImageFile = computed(() => isFile.value && fileIconCategory(props.item.text) === "image");
+const originalImageSrc = computed(() => clipImageSrc(props.item));
+const thumbnailSrc = useImageThumbnail(() => isImage.value ? props.item.text : null);
+const imageSrc = computed(() => thumbnailSrc.value || originalImageSrc.value);
 const colorPreviewValue = computed(() => props.item.text.trim());
-const displayTitle = computed(() => props.item.displayName?.trim() || "");
-const headerLabel = computed(() => displayTitle.value || typeLabel(props.item.clipType));
 // Keep full clipboard content for copying/viewing, but never lay it all out in a card.
 const contentText = computed(() => props.item.text);
+const fileName = computed(() => clipFileName(contentText.value));
+const fileArtworkSrc = computed(() => fileIconSrc(contentText.value));
+const displayTitle = computed(() => props.item.displayName?.trim() || "");
+const headerLabel = computed(() => displayTitle.value || typeLabel(props.item.clipType));
 const clipType = computed(() => props.item.clipType);
 const previewText = computed(() => props.item.previewText);
 const previewContent = computed(() => (contentText.value || previewText.value).slice(0, 500));
@@ -62,13 +71,30 @@ const categoryTagColor = computed(() => {
 const displayTime = computed(() =>
   props.item.collection === "history" ? props.item.lastCapturedAt : props.item.createdAt,
 );
-const metricText = computed(() => clipMetricText(clipType.value, contentText.value, previewText.value));
+const filePreview = useFileReferencePreview(
+  () => isFile.value ? contentText.value : null,
+  () => props.item.collection === "history" ? props.item.lastCapturedAt : props.item.updatedAt,
+);
+const cardImageSrc = computed(() => isImage.value ? imageSrc.value : filePreview.thumbnailSrc.value);
+const showsImagePreview = computed(() => isImage.value || (isImageFile.value && !!cardImageSrc.value));
+const pixelDimensions = computed(() => {
+  const dimensions = filePreview.dimensions.value;
+  return isImageFile.value && dimensions
+    ? `${dimensions.width} × ${dimensions.height}`
+    : "";
+});
+const metricText = computed(() => isImageFile.value ? formatFileSize(filePreview.size.value) : clipMetricText(
+  clipType.value,
+  contentText.value,
+  previewText.value,
+  filePreview.size.value,
+));
 
 const iconComponent = computed(() => {
   if (props.item.clipType === "link") return Link;
   if (props.item.clipType === "color") return Palette;
   if (props.item.clipType === "image") return Image;
-  if (props.item.clipType === "file") return FileText;
+  if (props.item.clipType === "file") return File;
   return Type;
 });
 
@@ -133,6 +159,14 @@ function resetImagePreview(event: PointerEvent) {
     >
       <Maximize2 class="size-3.5" />
     </button>
+    <img
+      v-if="isFile && !filePreview.thumbnailSrc.value && !filePreview.error.value"
+      class="clip-file-watermark"
+      :src="fileArtworkSrc"
+      alt=""
+      aria-hidden="true"
+      draggable="false"
+    />
     <div class="clip-card-main">
       <div class="clip-card-content min-w-0">
         <div class="flex items-center gap-2 pr-8">
@@ -188,17 +222,34 @@ function resetImagePreview(event: PointerEvent) {
         />
 
         <div
-          v-if="isImage"
+          v-if="showsImagePreview"
           class="clip-preview-image mt-1.5"
           @pointermove="moveImagePreview"
           @pointerleave="resetImagePreview"
         >
-          <img class="w-full object-cover" :src="imageSrc" :alt="t('common.imagePreviewAlt')" />
+          <img class="w-full object-cover" :src="cardImageSrc" :alt="isImageFile ? fileName : t('common.imagePreviewAlt')" draggable="false" />
         </div>
 
         <div v-else-if="isColor" class="clip-preview-color mt-1.5">
           <span class="clip-preview-color-swatch" :style="{ backgroundColor: colorPreviewValue }" />
           <span class="clip-preview-color-code">{{ previewContent }}</span>
+        </div>
+
+        <div
+          v-else-if="isFile"
+          class="clip-file-preview mt-1 min-h-0 flex-1 overflow-hidden"
+        >
+          <div class="clip-file-summary">
+            <span
+              v-if="!isImageFile"
+              class="clip-file-name"
+              :title="contentText"
+              :data-tooltip="contentText"
+            >{{ fileName || typeLabel(item.clipType) }}</span>
+            <span v-if="filePreview.error.value" class="clip-file-error" role="status">
+              {{ filePreview.error.value }}
+            </span>
+          </div>
         </div>
 
         <p
@@ -210,8 +261,13 @@ function resetImagePreview(event: PointerEvent) {
         </p>
       </div>
     </div>
-    <div class="clip-card-footer">
-      <span class="clip-metric-badge">{{ metricText }}</span>
+    <div class="clip-card-footer" :class="{ 'clip-card-footer-image-file': isImageFile }">
+      <span v-if="pixelDimensions" class="clip-metric-badge clip-file-metric">
+        <span class="sr-only">{{ metricText }}, {{ pixelDimensions }}</span>
+        <span class="clip-file-metric-face clip-file-metric-size" aria-hidden="true">{{ metricText }}</span>
+        <span class="clip-file-metric-face clip-file-metric-pixels" aria-hidden="true">{{ pixelDimensions }}</span>
+      </span>
+      <span v-else class="clip-metric-badge">{{ metricText }}</span>
       <span
         v-if="categoryTagLabel"
         class="clip-category-tag"
@@ -220,6 +276,12 @@ function resetImagePreview(event: PointerEvent) {
         <span class="clip-category-tag-dot" />
         {{ categoryTagLabel }}
       </span>
+      <span
+        v-if="isImageFile"
+        class="clip-file-footer-name"
+        :title="fileName"
+        :data-tooltip="fileName"
+      >{{ fileName }}</span>
     </div>
   </article>
 </template>

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { Clipboard, Info, Link } from "lucide-vue-next";
 import { computed } from "vue";
+import { useFileReferencePreview } from "../composables/useFileReferencePreview";
+import { clipFileName, fileIconSrc } from "../lib/clipFile";
 import { clipImageSrc } from "../lib/clipMedia";
 import { t } from "../i18n";
 import { clipMetricText, formatTime, typeLabel } from "../lib/format";
@@ -12,9 +14,20 @@ const props = defineProps<{
 
 const lines = computed(() => props.item?.text.split(/\r?\n/).length ?? 0);
 const isImage = computed(() => props.item?.clipType === "image");
+const isFile = computed(() => props.item?.clipType === "file");
 const imageSrc = computed(() => props.item ? clipImageSrc(props.item) : "");
+const fileArtworkSrc = computed(() => fileIconSrc(props.item?.text ?? ""));
+const filePreview = useFileReferencePreview(
+  () => isFile.value ? props.item?.text ?? null : null,
+  () => {
+    const current = props.item;
+    if (!current) return "";
+    return current.collection === "history" ? current.lastCapturedAt : current.updatedAt;
+  },
+);
 const detailTitle = computed(() => {
   if (!props.item) return "";
+  if (props.item.clipType === "file") return clipFileName(props.item.text) || typeLabel(props.item.clipType);
   return props.item.displayName?.trim() || t("clip.clipboardTitle", { type: typeLabel(props.item.clipType) });
 });
 const displayTime = computed(() => {
@@ -62,12 +75,33 @@ const displayTime = computed(() => {
           <img class="max-h-[360px] w-full object-contain" :src="imageSrc" :alt="t('common.imagePreviewAlt')" />
         </div>
 
+        <section v-else-if="isFile" class="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <img
+            v-if="filePreview.thumbnailSrc.value"
+            :src="filePreview.thumbnailSrc.value"
+            class="mb-3 max-h-[240px] w-full rounded-md object-contain"
+            :alt="detailTitle"
+            draggable="false"
+          />
+          <div class="flex items-center gap-2 text-xs font-medium text-slate-500">
+            <img :src="fileArtworkSrc" class="h-9 w-auto shrink-0 object-contain" alt="" aria-hidden="true" draggable="false" />
+            <span>{{ t("file.path") }}</span>
+          </div>
+          <p class="mt-1 select-text break-all text-sm leading-5 text-slate-700" :title="item.text">{{ item.text }}</p>
+          <p v-if="filePreview.error.value" class="mt-2 text-xs leading-4 text-red-700" role="status">
+            {{ filePreview.error.value }}
+          </p>
+          <p v-else-if="filePreview.size.value !== null" class="mt-2 text-xs text-slate-500">
+            {{ clipMetricText(item.clipType, item.text, item.previewText, filePreview.size.value) }}
+          </p>
+        </section>
+
         <pre
-          v-if="!isImage"
+          v-if="!isImage && !isFile"
           class="max-h-[320px] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm leading-5 text-slate-800"
         >{{ item.text }}</pre>
 
-        <dl class="mt-4 grid grid-cols-2 gap-3 text-sm text-slate-400">
+        <dl v-if="!isFile" class="mt-4 grid grid-cols-2 gap-3 text-sm text-slate-400">
           <div>
             <dt class="text-xs text-slate-400">{{ t("common.size") }}</dt>
             <dd class="mt-1 text-slate-500">{{ clipMetricText(item.clipType, item.text, item.previewText) }}</dd>

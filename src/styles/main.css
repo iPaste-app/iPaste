@@ -2169,6 +2169,89 @@ body.ipaste-preserve-current-app .global-tooltip,
   --clip-type-rgb: 71, 85, 105;
 }
 
+.quick-preview-file {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  align-items: flex-start;
+  gap: 0.75rem;
+  overflow: auto;
+  padding: 1rem;
+}
+
+.quick-preview-file-thumbnail {
+  display: block;
+  width: min(12rem, 42%);
+  max-height: 16rem;
+  flex: 0 0 auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  background: #f8fafc;
+  object-fit: contain;
+}
+
+.quick-preview-file-error {
+  margin-top: 0.375rem;
+  color: #b91c1c;
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.clip-card-type-file .clip-card-main {
+  position: relative;
+  z-index: 1;
+}
+
+.clip-file-watermark {
+  position: absolute;
+  right: 0.35rem;
+  bottom: 0.25rem;
+  z-index: 0;
+  width: min(2.25rem, 20%);
+  max-height: 2.75rem;
+  height: auto;
+  object-fit: contain;
+  opacity: 0.25;
+  pointer-events: none;
+  user-select: none;
+}
+
+.clip-file-preview {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  padding-right: min(2.5rem, 22%);
+}
+
+.clip-file-summary {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.1875rem;
+}
+
+.clip-file-name {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: #475569;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.clip-file-error {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #b91c1c;
+  font-size: 0.6875rem;
+  line-height: 0.875rem;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .clip-card-type-html {
   --clip-type-rgb: 217, 119, 6;
 }
@@ -2326,7 +2409,7 @@ body.ipaste-preserve-current-app .global-tooltip,
   flex: 1 1 auto;
   overflow: hidden;
   border: 1px solid #e2e8f0;
-  border-radius: 0.375rem;
+  border-radius: 0.25rem;
   background: #f8fafc;
   cursor: zoom-in;
 }
@@ -2476,6 +2559,72 @@ body.ipaste-preserve-current-app .global-tooltip,
   justify-content: space-between;
   gap: 0.5rem;
   pointer-events: none;
+}
+
+.clip-card-footer-image-file .clip-metric-badge {
+  flex: 0 0 auto;
+}
+
+.clip-file-metric {
+  /* Reserve the wider face so hovering never shifts the filename beside it. */
+  display: inline-grid;
+  perspective: 160px;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+
+.clip-file-metric-face {
+  grid-area: 1 / 1;
+  backface-visibility: hidden;
+  transition:
+    transform 180ms cubic-bezier(0.23, 1, 0.32, 1),
+    opacity 180ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.clip-file-metric-size {
+  transform: translateY(0) rotateX(0deg);
+  opacity: 1;
+}
+
+.clip-file-metric-pixels {
+  transform: translateY(45%) rotateX(-90deg);
+  opacity: 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .clip-card:hover .clip-file-metric-size {
+    transform: translateY(-45%) rotateX(90deg);
+    opacity: 0;
+  }
+
+  .clip-card:hover .clip-file-metric-pixels {
+    transform: translateY(0) rotateX(0deg);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .clip-file-metric-face {
+    transform: none !important;
+    transition: none !important;
+  }
+}
+
+.clip-card-footer-image-file .clip-category-tag {
+  max-width: 25%;
+}
+
+.clip-file-footer-name {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  line-height: 1.25;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: auto;
 }
 
 .subtle-scrollbar {

@@ -8,6 +8,18 @@ use std::{
 
 #[cfg(target_os = "windows")]
 mod windows_ocr;
+mod file_clipboard;
+mod file_preview;
+mod clipboard_png;
+mod clipboard_access;
+mod clipboard_image;
+#[cfg(all(test, target_os = "windows"))]
+mod clipboard_access_tests;
+mod image_assets;
+#[cfg(test)]
+mod image_capture_tests;
+#[cfg(test)]
+mod file_clipboard_tests;
 #[cfg(target_os = "windows")]
 mod ocr_asset_cache;
 mod ocr_error;
@@ -168,7 +180,6 @@ const STAR_PROMPT_SECOND_SNOOZE_DAYS: i64 = 30;
 const STAR_PROMPT_SECOND_SNOOZE_PASTES: u64 = 100;
 const CLIP_PAGE_SIZE: usize = 20;
 const IMAGE_DIR: &str = "clip-images";
-const IMAGE_FILE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "webp", "gif", "ico"];
 const DEFAULT_CLIPBOARD_SEEDS: [(&str, Option<&str>, &str); 6] = [
     (
         "text",
@@ -1873,12 +1884,43 @@ impl Store {
 
     fn save_image_bytes(&self, content_hash: &str, bytes: &[u8]) -> Result<String, String> {
         let dir = self.image_dir()?;
-        let filename = format!("{}.png", safe_filename(content_hash));
+        let format = image::guess_format(bytes).map_err(|error| error.to_string())?;
+        let extension = image_assets::extension(format)?;
+        let filename = format!("{}.{}", safe_filename(content_hash), extension);
         let path = dir.join(filename);
-        if !path.exists() {
-            fs::write(&path, bytes).map_err(|error| error.to_string())?;
-        }
+        image_assets::write_if_absent(&path, bytes)?;
         Ok(path.to_string_lossy().to_string())
+    }
+
+    fn image_thumbnail(&self, source: &str) -> Result<String, String> {
+        let root = self.image_dir()?.canonicalize().map_err(|error| error.to_string())?;
+        let source = Path::new(source).canonicalize().map_err(|error| error.to_string())?;
+        if source.parent() != Some(root.as_path()) || !source.is_file() {
+            return Err("只能读取 iPaste 剪贴板图片".to_string());
+        }
+        let filename = source.file_name().and_then(|name| name.to_str())
+            .ok_or_else(|| "图片文件名无效".to_string())?;
+        let thumbnail = root.join("thumbnails").join(format!("{filename}.png"));
+        image_assets::ensure_thumbnail(&source, &thumbnail)?;
+        Ok(thumbnail.to_string_lossy().to_string())
+    }
+
+    fn file_reference_preview(&self, source: &str) -> Result<file_preview::FilePreview, String> {
+        // External paths may be previewed only while retained as file references.
+        // Expose the generated thumbnail through the existing app-owned asset scope.
+        let retained: bool = self.connect()?.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM clips WHERE clip_type = 'file' AND text = ?1
+                UNION ALL
+                SELECT 1 FROM category_items WHERE clip_type = 'file' AND text = ?1
+            )",
+            params![source],
+            |row| row.get(0),
+        ).map_err(|error| error.to_string())?;
+        if !retained {
+            return Err(file_clipboard::FILE_UNAVAILABLE.to_string());
+        }
+        file_preview::preview(source, &self.image_dir()?.join("file-previews"))
     }
 
     fn image_dir(&self) -> Result<PathBuf, String> {
@@ -2315,13 +2357,16 @@ impl Store {
         collection: String,
         text: String,
     ) -> Result<ClipUpdate, String> {
-        let preview_text = preview(&text);
-        let content_hash = hash_text(&text);
         match collection.as_str() {
             "history" => {
                 let mut conn = self.connect()?;
                 let tx = conn.transaction().map_err(|error| error.to_string())?;
                 let current = self.get_clip_with_conn(&tx, &id)?;
+                if current.clip_type == "file" {
+                    return Err(file_clipboard::FILE_READ_ONLY.to_string());
+                }
+                let preview_text = preview(&text);
+                let content_hash = hash_text(&text);
 
                 if let Some(existing) =
                     self.get_clip_by_content_hash_with_conn(&tx, &content_hash, Some(&id))?
@@ -2364,6 +2409,11 @@ impl Store {
                 let mut conn = self.connect()?;
                 let tx = conn.transaction().map_err(|error| error.to_string())?;
                 let current = self.get_category_item_with_conn(&tx, &id)?;
+                if current.clip_type == "file" {
+                    return Err(file_clipboard::FILE_READ_ONLY.to_string());
+                }
+                let preview_text = preview(&text);
+                let content_hash = hash_text(&text);
 
                 if let Some(existing) = self.get_category_item_by_content_hash_with_conn(
                     &tx,
@@ -2812,17 +2862,22 @@ fn set_clip_pinned(
 }
 
 #[tauri::command]
-fn copy_clip(
+async fn copy_clip(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     clip_type: String,
     text: String,
 ) -> Result<(), String> {
-    let captured_item = captured_item_from_payload(&clip_type, &text)?;
-
-    if clip_type == "image" {
-        write_clipboard_image(&text)?;
+    let _operation = clipboard_access::lock_command().await;
+    let captured_item = if clip_type == "file" {
+        Some(write_clipboard_file_item(text.clone()).await?)
+    } else if clip_type == "image" {
+        Some(write_clipboard_image_item(text.clone()).await?)
     } else {
+        captured_item_from_payload(&clip_type, &text)?
+    };
+
+    if clip_type != "image" && clip_type != "file" {
         write_clipboard_text(&text)?;
     }
 
@@ -2851,10 +2906,11 @@ fn copy_clip(
 }
 
 #[tauri::command]
-fn copy_text_ephemeral(
+async fn copy_text_ephemeral(
     state: tauri::State<'_, AppState>,
     text: String,
 ) -> Result<(), String> {
+    let _operation = clipboard_access::lock_command().await;
     let text = clean_ephemeral_text(text)?;
     write_clipboard_text(&text)?;
     remember_current_clipboard_marker(
@@ -2863,6 +2919,43 @@ fn copy_text_ephemeral(
         Some(hash_text(&text)),
     );
     Ok(())
+}
+
+#[tauri::command]
+async fn file_reference_size(path: String) -> Result<u64, String> {
+    tokio::task::spawn_blocking(move || file_clipboard::file_size(&path))
+        .await
+        .map_err(|_| file_clipboard::FILE_UNAVAILABLE.to_string())?
+}
+
+#[tauri::command]
+async fn file_reference_preview(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<file_preview::FilePreview, String> {
+    static WORKERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+    let store = state.store.clone();
+    let permit = WORKERS.acquire().await.map_err(|error| error.to_string())?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        store.file_reference_preview(&path)
+    })
+    .await
+    .map_err(|_| file_clipboard::FILE_UNAVAILABLE.to_string())?
+}
+
+#[tauri::command]
+async fn image_thumbnail(state: tauri::State<'_, AppState>, path: String) -> Result<String, String> {
+    // Bound decoding memory even when many cards become visible together.
+    static WORKERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+    let store = state.store.clone();
+    let permit = WORKERS.acquire().await.map_err(|error| error.to_string())?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        store.image_thumbnail(&path)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -3236,9 +3329,10 @@ fn read_clip_image_data_url(
         return Err("只能读取 iPaste 剪贴板图片".to_string());
     }
 
-    let bytes = fs::read(&canonical_path).map_err(|error| error.to_string())?;
+    let bytes = image_assets::read_encoded_file(&canonical_path)?;
     Ok(format!(
-        "data:image/png;base64,{}",
+        "data:{};base64,{}",
+        image::guess_format(&bytes).map_err(|error| error.to_string())?.to_mime_type(),
         general_purpose::STANDARD.encode(bytes)
     ))
 }
@@ -3411,17 +3505,27 @@ fn open_accessibility_settings() -> Result<(), String> {
 }
 
 #[tauri::command]
-fn apply_clip(
+async fn apply_clip(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     id: String,
     clip_type: String,
     text: String,
 ) -> Result<(), String> {
-    let captured_item = captured_item_from_payload(&clip_type, &text)?;
-    if clip_type == "image" {
-        write_clipboard_image(&text)?;
+    let target_app_bundle_id = state
+        .target_app_bundle_id
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    let _operation = clipboard_access::lock_command().await;
+    let captured_item = if clip_type == "file" {
+        Some(write_clipboard_file_item(text.clone()).await?)
+    } else if clip_type == "image" {
+        Some(write_clipboard_image_item(text.clone()).await?)
     } else {
+        captured_item_from_payload(&clip_type, &text)?
+    };
+    if clip_type != "image" && clip_type != "file" {
         write_clipboard_text(&text)?;
     }
     remember_current_clipboard_marker(
@@ -3429,12 +3533,6 @@ fn apply_clip(
         &state.last_clipboard_hash,
         captured_item.as_ref().map(|item| item.content_hash.clone()),
     );
-    let target_app_bundle_id = state
-        .target_app_bundle_id
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
-
     let _ = hide_main_window(&app);
 
     if let Err(error) = prepare_target_for_paste(&app, target_app_bundle_id) {
@@ -3478,11 +3576,12 @@ fn apply_clip(
 }
 
 #[tauri::command]
-fn apply_text_ephemeral(
+async fn apply_text_ephemeral(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     text: String,
 ) -> Result<(), String> {
+    let _operation = clipboard_access::lock_command().await;
     let text = clean_ephemeral_text(text)?;
     write_clipboard_text(&text)?;
     remember_current_clipboard_marker(
@@ -3594,6 +3693,9 @@ pub fn run() {
             set_clip_pinned,
             copy_clip,
             copy_text_ephemeral,
+            file_reference_size,
+            file_reference_preview,
+            image_thumbnail,
             set_listening,
             set_append_copy_enabled,
             update_settings,
@@ -5351,6 +5453,11 @@ fn spawn_clipboard_watcher(
         }
 
         let before_change_id = clipboard_change_id();
+        if clipboard_change_already_seen(before_change_id, &last_clipboard_change_id) {
+            thread::sleep(Duration::from_millis(150));
+            continue;
+        }
+        let capture_started = std::time::Instant::now();
 
         match read_clipboard_item() {
             Ok(ClipboardRead::Item(item)) => {
@@ -5370,10 +5477,14 @@ fn spawn_clipboard_watcher(
                     &last_clipboard_change_id,
                     &last_clipboard_hash,
                 ) {
-                    thread::sleep(Duration::from_millis(700));
+                    thread::sleep(Duration::from_millis(150));
                     continue;
                 }
 
+                let is_image = item.clip_type == "image";
+                let read_elapsed = capture_started.elapsed();
+                let content_hash = item.content_hash.clone();
+                let mut appended = false;
                 let capture_result = capture_append_copy_item(
                     &store,
                     &append_copy_state,
@@ -5382,9 +5493,31 @@ fn spawn_clipboard_watcher(
                     &item,
                 )
                 .and_then(|append_copy_clip| match append_copy_clip {
-                    Some(result) => Ok(Some(result)),
+                    Some(result) => {
+                        appended = true;
+                        Ok(Some(result))
+                    }
                     None => store.insert_captured_item(item),
                 });
+
+                // Only commit successful captures. Busy/failed reads remain retryable.
+                // Append-copy already recorded its own newly written clipboard marker.
+                if capture_result.is_ok() && !appended && clipboard_change_id() == change_id {
+                    remember_clipboard_marker(
+                        change_id,
+                        &last_clipboard_change_id,
+                        &last_clipboard_hash,
+                        Some(content_hash),
+                    );
+                }
+                if cfg!(debug_assertions) && is_image {
+                    eprintln!(
+                        "[image capture] read={:?}, persist={:?}, success={}",
+                        read_elapsed,
+                        capture_started.elapsed().saturating_sub(read_elapsed),
+                        capture_result.is_ok(),
+                    );
+                }
 
                 match capture_result {
                     Ok(Some((clip, clip_total_count, was_inserted))) => {
@@ -5403,14 +5536,24 @@ fn spawn_clipboard_watcher(
                     }
                 }
             }
-            Ok(ClipboardRead::Empty) => {}
+            Ok(ClipboardRead::Empty) => {
+                if clipboard_change_id() == before_change_id {
+                    remember_clipboard_marker(
+                        before_change_id,
+                        &last_clipboard_change_id,
+                        &last_clipboard_hash,
+                        None,
+                    );
+                }
+            }
             Ok(ClipboardRead::Occupied) => {}
             Err(error) => {
                 let _ = app.emit("ipaste://capture-error", error);
+                thread::sleep(Duration::from_millis(550));
             }
         }
 
-        thread::sleep(Duration::from_millis(700));
+        thread::sleep(Duration::from_millis(150));
     });
 }
 
@@ -5421,7 +5564,7 @@ fn capture_append_copy_item(
     last_clipboard_hash: &Arc<Mutex<Option<String>>>,
     item: &CapturedClipboardItem,
 ) -> Result<Option<(ClipItem, usize, bool)>, String> {
-    if item.clip_type == "image" || item.text.trim().is_empty() {
+    if matches!(item.clip_type.as_str(), "image" | "file") || item.text.trim().is_empty() {
         return Ok(None);
     }
 
@@ -5479,24 +5622,33 @@ fn append_copy_text(current: &str, next: &str) -> String {
 fn read_clipboard_item() -> Result<ClipboardRead, String> {
     let mut clipboard = Clipboard::new().map_err(|error| error.to_string())?;
 
-    #[cfg(target_os = "macos")]
-    if let Some(read) = read_clipboard_image_file(&mut clipboard)? {
+    if let Some(read) = read_clipboard_file_list(&mut clipboard)? {
         return Ok(read);
     }
 
-    match clipboard.get_image() {
+    if let Some(bytes) = clipboard_png::read_png()? {
+        // Fall back to the platform decoder if the PNG metadata cannot be read.
+        if let Ok(item) = captured_item_from_encoded_image(bytes) {
+            return Ok(ClipboardRead::Item(item));
+        }
+    }
+
+    let image = {
+        let _access = clipboard_access::lock();
+        clipboard.get_image()
+    };
+    match image {
         Ok(image) => return captured_item_from_image(image).map(ClipboardRead::Item),
         Err(ClipboardError::ContentNotAvailable) => {}
         Err(ClipboardError::ClipboardOccupied) => return Ok(ClipboardRead::Occupied),
         Err(error) => return Err(error.to_string()),
     }
 
-    #[cfg(not(target_os = "macos"))]
-    if let Some(read) = read_clipboard_image_file(&mut clipboard)? {
-        return Ok(read);
-    }
-
-    match clipboard.get_text() {
+    let text = {
+        let _access = clipboard_access::lock();
+        clipboard.get_text()
+    };
+    match text {
         Ok(text) => {
             let normalized = text.trim();
             if normalized.is_empty() {
@@ -5519,13 +5671,29 @@ fn read_clipboard_item() -> Result<ClipboardRead, String> {
     Ok(ClipboardRead::Empty)
 }
 
-fn read_clipboard_image_file(clipboard: &mut Clipboard) -> Result<Option<ClipboardRead>, String> {
-    match clipboard.get().file_list() {
-        Ok(paths) => captured_item_from_file_list(&paths).map(|item| item.map(ClipboardRead::Item)),
+fn read_clipboard_file_list(clipboard: &mut Clipboard) -> Result<Option<ClipboardRead>, String> {
+    let paths = {
+        let _access = clipboard_access::lock();
+        clipboard.get().file_list()
+    };
+    match paths {
+        Ok(paths) => Ok(Some(
+            captured_item_from_file_list(&paths)?
+                .map(ClipboardRead::Item)
+                .unwrap_or(ClipboardRead::Empty),
+        )),
         Err(ClipboardError::ContentNotAvailable) => Ok(None),
         Err(ClipboardError::ClipboardOccupied) => Ok(Some(ClipboardRead::Occupied)),
         Err(error) => Err(error.to_string()),
     }
+}
+
+fn clipboard_change_already_seen(
+    change_id: Option<u64>,
+    last_clipboard_change_id: &Arc<Mutex<Option<u64>>>,
+) -> bool {
+    change_id.is_some()
+        && last_clipboard_change_id.lock().map(|last| *last == change_id).unwrap_or(false)
 }
 
 fn should_capture_clipboard_item(
@@ -5545,30 +5713,10 @@ fn should_capture_clipboard_item(
     let same_hash = last_hash.as_deref() == Some(content_hash);
 
     if let Some(id) = change_id {
-        if last_change_id == Some(id) && same_hash {
-            return false;
-        }
-
-        if let Ok(mut last) = last_clipboard_change_id.lock() {
-            *last = Some(id);
-        }
-        if let Ok(mut last_hash) = last_clipboard_hash.lock() {
-            *last_hash = Some(content_hash.to_string());
-        }
-        return true;
+        return last_change_id != Some(id);
     }
 
-    if same_hash {
-        return false;
-    }
-
-    last_clipboard_hash
-        .lock()
-        .map(|mut last| {
-            *last = Some(content_hash.to_string());
-            true
-        })
-        .unwrap_or(true)
+    !same_hash
 }
 
 fn remember_current_clipboard_marker(
@@ -5576,7 +5724,16 @@ fn remember_current_clipboard_marker(
     last_clipboard_hash: &Arc<Mutex<Option<String>>>,
     content_hash: Option<String>,
 ) {
-    if let Some(id) = clipboard_change_id() {
+    remember_clipboard_marker(clipboard_change_id(), last_clipboard_change_id, last_clipboard_hash, content_hash);
+}
+
+fn remember_clipboard_marker(
+    change_id: Option<u64>,
+    last_clipboard_change_id: &Arc<Mutex<Option<u64>>>,
+    last_clipboard_hash: &Arc<Mutex<Option<String>>>,
+    content_hash: Option<String>,
+) {
+    if let Some(id) = change_id {
         if let Ok(mut last) = last_clipboard_change_id.lock() {
             *last = Some(id);
         }
@@ -5607,16 +5764,51 @@ fn clipboard_change_id() -> Option<u64> {
 }
 
 fn write_clipboard_text(text: &str) -> Result<(), String> {
+    let _access = clipboard_access::lock();
     let mut clipboard = Clipboard::new().map_err(|error| error.to_string())?;
     clipboard.set_text(text).map_err(|error| error.to_string())
 }
 
-fn write_clipboard_image(data_url: &str) -> Result<(), String> {
-    let image = image_from_source(data_url)?;
-    let mut clipboard = Clipboard::new().map_err(|error| error.to_string())?;
-    clipboard
-        .set_image(image)
-        .map_err(|error| error.to_string())
+fn write_clipboard_image(source: &str) -> Result<CapturedClipboardItem, String> {
+    let started = std::time::Instant::now();
+    // The captured snapshot and native writer share one read of the encoded source.
+    let item = captured_item_from_encoded_image(image_bytes_from_source(source)?)?;
+    let read_elapsed = started.elapsed();
+    let bytes = item.image_bytes.as_deref().ok_or("图片数据为空")?;
+    clipboard_image::write_encoded(bytes)?;
+    if cfg!(debug_assertions) {
+        eprintln!(
+            "[image paste] read={:?}, prepare_and_write={:?}",
+            read_elapsed,
+            started.elapsed().saturating_sub(read_elapsed),
+        );
+    }
+    Ok(item)
+}
+
+async fn write_clipboard_image_item(source: String) -> Result<CapturedClipboardItem, String> {
+    // Bound decoded-image memory while allowing the UI/runtime to keep responding.
+    static PREPARATION: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+    let permit = PREPARATION
+        .acquire()
+        .await
+        .map_err(|error| error.to_string())?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        write_clipboard_image(&source)
+    })
+        .await
+        .map_err(|error| format!("无法准备剪贴板图片：{error}"))?
+}
+
+async fn write_clipboard_file_item(text: String) -> Result<CapturedClipboardItem, String> {
+    let reference = tokio::task::spawn_blocking(move || {
+        file_clipboard::write_file_reference(&text)
+    })
+    .await
+    .map_err(|_| file_clipboard::FILE_UNAVAILABLE.to_string())??;
+
+    Ok(captured_item_from_file_reference(reference))
 }
 
 fn send_paste_shortcut() -> Result<(), String> {
@@ -5697,31 +5889,39 @@ fn captured_item_from_image(image: ImageData<'static>) -> Result<CapturedClipboa
     })
 }
 
+fn captured_item_from_encoded_image(bytes: Vec<u8>) -> Result<CapturedClipboardItem, String> {
+    let (_, width, height) = image_assets::encoded_image_info(&bytes)?;
+    Ok(CapturedClipboardItem {
+        clip_type: "image".to_string(),
+        content_hash: hash_bytes(&bytes),
+        preview_text: format!("{} x {}", width, height),
+        text: String::new(),
+        image_bytes: Some(bytes),
+    })
+}
+
 fn captured_item_from_file_list(
     paths: &[PathBuf],
 ) -> Result<Option<CapturedClipboardItem>, String> {
-    let [path] = paths else {
+    let Some(reference) = file_clipboard::classify_file_list(paths) else {
         return Ok(None);
     };
 
-    if !is_supported_image_file_path(path) || !path.is_file() {
-        return Ok(None);
-    }
-
-    image_from_source_path(path)
-        .and_then(captured_item_from_image)
-        .map(Some)
+    // Native file-list data expresses a file copy, including image files.
+    // Image-only clipboard data is captured separately as an owned image snapshot.
+    Ok(Some(captured_item_from_file_reference(reference)))
 }
 
-fn is_supported_image_file_path(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| {
-            IMAGE_FILE_EXTENSIONS
-                .iter()
-                .any(|supported| extension.eq_ignore_ascii_case(supported))
-        })
-        .unwrap_or(false)
+fn captured_item_from_file_reference(
+    reference: file_clipboard::FileReference,
+) -> CapturedClipboardItem {
+    CapturedClipboardItem {
+        clip_type: "file".to_string(),
+        content_hash: reference.content_hash,
+        preview_text: reference.file_name,
+        text: reference.text,
+        image_bytes: None,
+    }
 }
 
 fn captured_item_from_payload(
@@ -5729,8 +5929,14 @@ fn captured_item_from_payload(
     text: &str,
 ) -> Result<Option<CapturedClipboardItem>, String> {
     if clip_type == "image" {
-        let image = image_from_source(text)?;
-        return captured_item_from_image(image).map(Some);
+        let bytes = image_bytes_from_source(text)?;
+        return captured_item_from_encoded_image(bytes).map(Some);
+    }
+
+    if clip_type == "file" {
+        return file_clipboard::prepare_file_reference(text)
+            .map(captured_item_from_file_reference)
+            .map(Some);
     }
 
     let normalized = text.trim();
@@ -5739,7 +5945,7 @@ fn captured_item_from_payload(
     }
 
     let clip_type = match clip_type {
-        "text" | "link" | "color" | "html" | "file" => clip_type.to_string(),
+        "text" | "link" | "color" | "html" => clip_type.to_string(),
         _ => detect_clip_type(normalized),
     };
 
@@ -5785,25 +5991,28 @@ fn image_bytes_from_data_url(data_url: &str) -> Result<Vec<u8>, String> {
         .map_err(|error| error.to_string())
 }
 
-fn image_from_source(source: &str) -> Result<ImageData<'static>, String> {
-    let bytes = if source.starts_with("data:image/") {
-        image_bytes_from_data_url(source)?
+fn image_bytes_from_source(source: &str) -> Result<Vec<u8>, String> {
+    if source.starts_with("data:image/") {
+        image_bytes_from_data_url(source)
     } else {
-        return image_from_source_path(Path::new(source));
-    };
-
-    image_from_bytes(&bytes)
+        image_assets::read_encoded_file(Path::new(source))
+    }
 }
 
+#[cfg(test)]
+fn image_from_source(source: &str) -> Result<ImageData<'static>, String> {
+    image_from_bytes(&image_bytes_from_source(source)?)
+}
+
+#[cfg(test)]
 fn image_from_source_path(path: &Path) -> Result<ImageData<'static>, String> {
-    let bytes = fs::read(path).map_err(|error| error.to_string())?;
+    let bytes = image_assets::read_encoded_file(path)?;
     image_from_bytes(&bytes)
 }
 
+#[cfg(test)]
 fn image_from_bytes(bytes: &[u8]) -> Result<ImageData<'static>, String> {
-    let decoded = image::load_from_memory(&bytes)
-        .map_err(|error| error.to_string())?
-        .to_rgba8();
+    let decoded = image_assets::decode(bytes)?.to_rgba8();
     let width = decoded.width() as usize;
     let height = decoded.height() as usize;
 

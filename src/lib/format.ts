@@ -1,5 +1,6 @@
 import type { ClipType } from "../types";
 import { currentLocale, t } from "../i18n";
+import { clipFileExtension } from "./clipFile";
 
 export function formatShortcut(shortcut: string) {
   return shortcut
@@ -57,7 +58,28 @@ export function imageStats(previewText: string) {
   return trimmed.replace(/^(?:image|图片|画像|이미지|imagen|bild)\s*[:：-]?\s*/i, "").trim();
 }
 
-export function clipMetricText(type: ClipType, text: string, previewText: string) {
+export function formatFileSize(bytes: number | null | undefined) {
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return "";
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  // Avoid displaying 1024 KB at a rounding boundary.
+  if (Number(value.toFixed(1)) >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${Number(value.toFixed(unit === 0 ? 0 : 1))} ${units[unit]}`;
+}
+
+export function clipMetricText(type: ClipType, text: string, previewText: string, fileSize?: number | null) {
+  if (type === "file") {
+    const extension = clipFileExtension(text).toUpperCase() || t("type.file");
+    return [formatFileSize(fileSize), extension].filter(Boolean).join(" · ");
+  }
   return type === "image" ? imageStats(previewText) : textStats(text);
 }
 

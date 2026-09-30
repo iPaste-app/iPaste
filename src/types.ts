@@ -1,5 +1,13 @@
 export type ClipType = "text" | "link" | "color" | "image" | "file" | "html";
 
+// A file clip stores an immutable absolute path in `text`, never file contents.
+
+export type FileReferencePreview = {
+  size: number;
+  thumbnailPath: string | null;
+  dimensions: { width: number; height: number } | null;
+};
+
 export type ClipItem = {
   id: string;
   clipType: ClipType;
