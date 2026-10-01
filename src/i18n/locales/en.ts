@@ -90,6 +90,8 @@ export const en = {
   "detail.title": "Details",
   "detail.noSelection": "No clipboard item selected",
 
+  "update.title.checking": "Checking for updates",
+  "update.title.noUpdate": "You're up to date",
   "update.title.downloading": "Updating iPaste",
   "update.title.ready": "Update ready",
   "update.title.installError": "Update installation failed",
@@ -105,6 +107,7 @@ export const en = {
   "update.progressDownloaded": "{bytes} downloaded",
   "update.installNow": "Update now",
   "update.restartNow": "Restart now",
+  "update.retry": "Try again",
   "update.viewReleaseNotes": "View release notes",
   "update.viewFullReleaseNotes": "View full release notes",
   "update.button.checking": "Checking",

@@ -91,6 +91,8 @@ export const zhCN = {
   "detail.title": "详情",
   "detail.noSelection": "未选择剪贴板内容",
 
+  "update.title.checking": "正在检查更新",
+  "update.title.noUpdate": "已是最新版",
   "update.title.downloading": "正在更新 iPaste",
   "update.title.ready": "更新已准备好",
   "update.title.installError": "安装更新失败",
@@ -106,6 +108,7 @@ export const zhCN = {
   "update.progressDownloaded": "{bytes} 已下载",
   "update.installNow": "立即更新",
   "update.restartNow": "立即重启",
+  "update.retry": "重试",
   "update.viewReleaseNotes": "查看更新日志",
   "update.viewFullReleaseNotes": "查看完整更新日志",
   "update.button.checking": "检查中",
