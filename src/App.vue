@@ -1311,6 +1311,7 @@ function scrollSelectedClipIntoView() {
         :total-bytes="updater.updateTotalBytes.value"
         @dismiss="updater.dismissUpdateDialog"
         @install="updater.installAvailableUpdate"
+        @retry="updater.retryUpdate"
         @relaunch="updater.relaunchForUpdate"
       />
 

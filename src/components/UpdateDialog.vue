@@ -26,6 +26,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   dismiss: [];
   install: [];
+  retry: [];
   relaunch: [];
 }>();
 
@@ -43,6 +44,8 @@ watch(() => props.open, async (open) => {
 }, { immediate: true });
 
 const title = computed(() => {
+  if (props.status === "checking") return t("update.title.checking");
+  if (props.status === "noUpdate") return t("update.title.noUpdate");
   if (props.status === "downloading") return t("update.title.downloading");
   if (props.status === "ready") return t("update.title.ready");
   if (props.status === "error" && props.errorPhase === "install") return t("update.title.installError");
@@ -121,7 +124,11 @@ async function openReleaseNotes() {
         </button>
       </header>
 
-      <div v-if="status === 'available'" class="update-dialog-body update-dialog-notes-body">
+      <div v-if="status === 'checking' || status === 'noUpdate'" class="update-dialog-body">
+        <p>{{ t(status === 'checking' ? "update.summary.checking" : "update.summary.noUpdate") }}</p>
+      </div>
+
+      <div v-else-if="status === 'available'" class="update-dialog-body update-dialog-notes-body">
         <div class="update-release-panel">
           <MarkdownPreview v-if="releaseNotes" class="update-release-notes" :source="releaseNotes" />
           <button type="button" class="update-release-link" @click="openReleaseNotes">
@@ -150,6 +157,15 @@ async function openReleaseNotes() {
       </div>
 
       <footer class="update-dialog-actions">
+        <button
+          v-if="status === 'checking'"
+          type="button"
+          class="settings-action-button settings-action-button-primary"
+          disabled
+        >
+          <RotateCw class="size-4 update-spin" aria-hidden="true" />
+          <span>{{ t("update.button.checking") }}</span>
+        </button>
         <button
           v-if="status === 'downloading'"
           type="button"
@@ -185,12 +201,21 @@ async function openReleaseNotes() {
           <span>{{ t("update.restartNow") }}</span>
         </button>
         <button
-          v-else-if="status === 'error'"
+          v-else-if="status === 'error' || status === 'noUpdate'"
           type="button"
           class="settings-action-button"
           @click="emit('dismiss')"
         >
           <span>{{ t("common.gotIt") }}</span>
+        </button>
+        <button
+          v-if="status === 'error'"
+          type="button"
+          class="settings-action-button settings-action-button-primary"
+          @click="emit('retry')"
+        >
+          <RotateCw class="size-4" aria-hidden="true" />
+          <span>{{ t("update.retry") }}</span>
         </button>
       </footer>
     </section>

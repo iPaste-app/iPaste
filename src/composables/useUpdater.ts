@@ -210,6 +210,18 @@ function createUpdater() {
     await dispatch("install");
   }
 
+  async function retryUpdate() {
+    if (updateStatus.value !== "error") return;
+
+    if (updateErrorPhase.value === "relaunch") {
+      await relaunchForUpdate();
+    } else if (updateErrorPhase.value === "install" && availableUpdate.value) {
+      await installAvailableUpdate();
+    } else {
+      await checkForUpdate({ openDialog: true });
+    }
+  }
+
   async function executeInstall() {
     if (!pendingUpdate) return;
 
@@ -288,6 +300,7 @@ function createUpdater() {
     checkForUpdate,
     openUpdateDialog,
     installAvailableUpdate,
+    retryUpdate,
     relaunchForUpdate,
     dismissUpdateDialog,
     dispose: () => sync?.dispose(),
