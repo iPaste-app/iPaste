@@ -526,7 +526,7 @@ async function updateLanguage(language: Language) {
         <div v-if="activeTab === 'general'" class="settings-section">
           <div class="settings-panel settings-general-panel">
             <section class="settings-general-item settings-language-panel">
-              <div class="settings-icon settings-icon-teal">
+              <div class="settings-icon">
                 <Sparkles class="size-5" />
               </div>
 
@@ -545,7 +545,7 @@ async function updateLanguage(language: Language) {
             </section>
 
             <section class="settings-general-item">
-              <div class="settings-icon settings-icon-teal">
+              <div class="settings-icon">
                 <Power class="size-5" />
               </div>
 
@@ -580,7 +580,7 @@ async function updateLanguage(language: Language) {
             </section>
 
             <section class="settings-general-item">
-              <div class="settings-icon settings-icon-blue">
+              <div class="settings-icon">
                 <SlidersHorizontal class="size-5" />
               </div>
 
@@ -606,7 +606,7 @@ async function updateLanguage(language: Language) {
 
             <section class="settings-general-item settings-general-item-column">
               <div class="settings-panel-heading">
-                <div class="settings-icon settings-icon-blue">
+                <div class="settings-icon">
                   <AppWindow class="size-5" />
                 </div>
                 <div class="min-w-0 flex-1">
@@ -645,7 +645,7 @@ async function updateLanguage(language: Language) {
 
             <section class="settings-general-item settings-general-item-column">
               <div class="settings-panel-heading">
-                <div class="settings-icon settings-icon-teal">
+                <div class="settings-icon">
                   <ClipboardPlus class="size-5" />
                 </div>
                 <div class="min-w-0 flex-1">
@@ -670,7 +670,7 @@ async function updateLanguage(language: Language) {
 
             <section class="settings-general-item settings-general-item-column">
               <div class="settings-panel-heading">
-                <div class="settings-icon settings-icon-blue">
+                <div class="settings-icon">
                   <Database class="size-5" />
                 </div>
                 <div class="min-w-0">
@@ -699,7 +699,7 @@ async function updateLanguage(language: Language) {
           <div class="settings-panel settings-shortcuts-panel">
             <section class="settings-shortcuts-item settings-shortcuts-item-column">
               <div class="settings-panel-heading">
-                <div class="settings-icon settings-icon-teal">
+                <div class="settings-icon">
                   <Keyboard class="size-5" />
                 </div>
                 <div class="min-w-0 flex-1">
@@ -754,7 +754,7 @@ async function updateLanguage(language: Language) {
 
             <section class="settings-shortcuts-item settings-shortcuts-item-column">
               <div class="settings-panel-heading">
-                <div class="settings-icon settings-icon-blue">
+                <div class="settings-icon">
                   <Blocks class="size-5" />
                 </div>
                 <div class="min-w-0 flex-1">
@@ -809,7 +809,7 @@ async function updateLanguage(language: Language) {
 
             <section class="settings-shortcuts-item settings-shortcuts-item-column">
               <div class="settings-panel-heading">
-                <div class="settings-icon settings-icon-blue">
+                <div class="settings-icon">
                   <Keyboard class="size-5" />
                 </div>
                 <div class="min-w-0 flex-1">
@@ -834,7 +834,7 @@ async function updateLanguage(language: Language) {
           <div class="data-management-grid">
             <section class="settings-panel settings-column-panel">
               <div class="settings-panel-heading">
-                <div class="settings-icon settings-icon-teal">
+                <div class="settings-icon">
                   <Cloud class="size-5" />
                 </div>
                 <div class="min-w-0">
@@ -883,7 +883,7 @@ async function updateLanguage(language: Language) {
 
         <div v-else-if="activeTab === 'permissions'" class="settings-section">
           <section class="settings-panel items-start">
-            <div class="settings-icon settings-icon-blue">
+            <div class="settings-icon">
               <Keyboard class="size-5" />
             </div>
 

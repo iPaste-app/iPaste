@@ -72,7 +72,7 @@ async function openSettings() {
 }
 
 .ocr-setup-details summary:focus-visible {
-  outline: 2px solid #0d9488;
+  outline: 2px solid var(--theme-accent);
   outline-offset: 2px;
 }
 

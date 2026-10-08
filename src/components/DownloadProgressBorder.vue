@@ -25,7 +25,10 @@ const percent = computed(() => props.progress === null ? undefined : Math.min(10
   border-radius: inherit;
   pointer-events: none;
   padding: 2px;
-  background: conic-gradient(#0d9488 var(--download-progress), #0d948826 0);
+  background: conic-gradient(
+    var(--download-progress-color, #0d9488) var(--download-progress),
+    var(--download-progress-track, #0d948826) 0
+  );
   mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   mask-composite: exclude;
 }

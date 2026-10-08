@@ -197,12 +197,12 @@ async function openSource() {
 }
 
 .ocr-card-active {
-  border-color: #0d9488;
-  background: #f0fdfa;
+  border-color: var(--theme-accent);
+  background: var(--theme-accent-soft);
 }
 
 .ocr-card-busy {
-  border-color: #99f6e4;
+  border-color: var(--theme-accent-border);
   background: #ffffff;
 }
 
@@ -275,14 +275,14 @@ async function openSource() {
 }
 
 .ocr-state-active {
-  color: #0f766e;
+  color: var(--theme-accent-hover);
   font-weight: 600;
 }
 
 .ocr-progress-fill {
   position: absolute;
   inset: 0;
-  background: #ccfbf1;
+  background: var(--theme-accent-selected);
   transform-origin: left;
   transition: transform 180ms linear;
   pointer-events: none;
@@ -294,7 +294,7 @@ async function openSource() {
   align-content: center;
   gap: 0.25rem 0.5rem;
   min-height: 2.25rem;
-  color: #0f766e;
+  color: var(--theme-accent-hover);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
@@ -433,13 +433,13 @@ summary {
 }
 
 summary:focus-visible {
-  outline: 2px solid #0d9488;
+  outline: 2px solid var(--theme-accent);
   outline-offset: 2px;
 }
 
 @media (hover: hover) and (pointer: fine) {
   .ocr-source:hover {
-    color: #0f766e;
+    color: var(--theme-accent-hover);
     text-decoration: underline;
     text-underline-offset: 3px;
   }

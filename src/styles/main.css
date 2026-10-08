@@ -2,6 +2,17 @@
 
 :root {
   --window-radius: 1rem;
+  --theme-accent: #3b82f6;
+  --theme-accent-hover: #2563eb;
+  --theme-accent-text: #1d4ed8;
+  --theme-accent-rgb: 59, 130, 246;
+  --theme-accent-soft: rgba(var(--theme-accent-rgb), 0.05);
+  --theme-accent-selected: rgba(var(--theme-accent-rgb), 0.1);
+  --theme-accent-border: rgba(var(--theme-accent-rgb), 0.22);
+  --theme-window-background:
+    linear-gradient(180deg, rgba(239, 246, 255, 0.72), rgba(248, 250, 252, 0.96)),
+    #f8fafc;
+  --theme-topbar-background: rgba(255, 255, 255, 0.82);
   font-family:
     "Noto Sans SC", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -63,9 +74,7 @@ input:focus-visible {
   border: 1px solid rgba(148, 163, 184, 0.72);
   border-radius: var(--window-radius);
   clip-path: inset(0 round var(--window-radius));
-  background:
-    linear-gradient(180deg, rgba(239, 246, 255, 0.72), rgba(248, 250, 252, 0.96)),
-    #f8fafc;
+  background: var(--theme-window-background);
   background-clip: padding-box;
   box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
 }
@@ -77,7 +86,7 @@ input:focus-visible {
   align-items: center;
   gap: 0.75rem;
   border-bottom: 1px solid #e2e8f0;
-  background: rgba(255, 255, 255, 0.82);
+  background: var(--theme-topbar-background);
   padding: 0 1rem;
 }
 
@@ -157,9 +166,9 @@ input:focus-visible {
 }
 
 .search-box:focus-within {
-  border-color: #2563eb;
+  border-color: var(--theme-accent);
   background: #ffffff;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  box-shadow: 0 0 0 3px rgba(var(--theme-accent-rgb), 0.12);
 }
 
 .icon-button {
@@ -2023,22 +2032,22 @@ body.ipaste-preserve-current-app .global-tooltip,
 }
 
 .category-chip:hover {
-  border-color: #bfdbfe;
-  background: #eff6ff;
-  color: #1e3a8a;
+  border-color: var(--theme-accent-border);
+  background: var(--theme-accent-soft);
+  color: var(--theme-accent-text);
 }
 
 .category-chip-active {
-  border-color: #2563eb;
-  background: #dbeafe;
-  color: #1d4ed8;
-  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.12);
+  border-color: var(--theme-accent);
+  background: var(--theme-accent-selected);
+  color: var(--theme-accent-hover);
+  box-shadow: 0 0 0 1px rgba(var(--theme-accent-rgb), 0.12);
 }
 
 .tag-strip-vertical .category-chip-active {
-  border-color: #bfdbfe;
-  background: #eff6ff;
-  color: #1e3a8a;
+  border-color: var(--theme-accent-border);
+  background: var(--theme-accent-soft);
+  color: var(--theme-accent-text);
   box-shadow: none;
 }
 
@@ -2049,15 +2058,15 @@ body.ipaste-preserve-current-app .global-tooltip,
   left: 0.3125rem;
   width: 0.1875rem;
   border-radius: 999px;
-  background: #2563eb;
+  background: var(--theme-accent);
   content: "";
   pointer-events: none;
 }
 
 .tag-strip-vertical .category-chip:hover {
-  border-color: #bfdbfe;
-  background: #eff6ff;
-  color: #1e3a8a;
+  border-color: var(--theme-accent-border);
+  background: var(--theme-accent-soft);
+  color: var(--theme-accent-text);
 }
 
 .tag-strip-vertical .category-count-dot {
@@ -2850,14 +2859,23 @@ body.ipaste-preserve-current-app .global-tooltip,
 }
 
 .settings-shell {
+  --download-progress-color: var(--theme-accent);
+  --download-progress-track: rgba(var(--theme-accent-rgb), 0.15);
   display: flex;
   width: 100vw;
   height: 100vh;
   min-width: 0;
   overflow: hidden;
-  background:
-    linear-gradient(180deg, rgba(239, 246, 255, 0.82), rgba(248, 250, 252, 0.98)),
-    #f8fafc;
+  background: var(--theme-window-background);
+}
+
+.settings-shell :is(button, article, a):focus-visible {
+  outline-color: var(--theme-accent);
+}
+
+.settings-shell ::selection {
+  background: var(--theme-accent-selected);
+  color: var(--theme-accent-text);
 }
 
 .settings-window {
@@ -2875,7 +2893,7 @@ body.ipaste-preserve-current-app .global-tooltip,
   align-items: center;
   justify-content: center;
   border-bottom: 1px solid #dbe3ee;
-  background: rgba(255, 255, 255, 0.78);
+  background: var(--theme-topbar-background);
   padding: 0.75rem 1.25rem;
   backdrop-filter: blur(18px);
 }
@@ -2922,11 +2940,11 @@ body.ipaste-preserve-current-app .global-tooltip,
 }
 
 .settings-tab-active {
-  background: #ffffff;
-  color: #0f766e;
+  background: var(--theme-accent-selected);
+  color: var(--theme-accent-hover);
   box-shadow:
     0 1px 2px rgba(15, 23, 42, 0.08),
-    0 0 0 1px rgba(13, 148, 136, 0.12);
+    0 0 0 1px rgba(var(--theme-accent-rgb), 0.12);
 }
 
 .settings-content {
@@ -2951,21 +2969,8 @@ body.ipaste-preserve-current-app .global-tooltip,
   flex: 0 0 auto;
   place-items: center;
   border-radius: 0.75rem;
-}
-
-.settings-icon-blue {
-  background: #eff6ff;
-  color: #1d4ed8;
-}
-
-.settings-icon-teal {
-  background: #ccfbf1;
-  color: #0f766e;
-}
-
-.settings-icon-violet {
-  background: #ede9fe;
-  color: #6d28d9;
+  background: var(--theme-accent-soft);
+  color: var(--theme-accent-hover);
 }
 
 .settings-panel {
@@ -3103,12 +3108,12 @@ body.ipaste-preserve-current-app .global-tooltip,
 }
 
 .layout-option-button-active {
-  border-color: #0d9488;
-  background: #ecfdf5;
-  color: #0f766e;
+  border-color: var(--theme-accent);
+  background: var(--theme-accent-soft);
+  color: var(--theme-accent-hover);
   box-shadow:
-    inset 0 0 0 1px rgba(13, 148, 136, 0.22),
-    0 6px 16px rgba(13, 148, 136, 0.08);
+    inset 0 0 0 1px rgba(var(--theme-accent-rgb), 0.22),
+    0 6px 16px rgba(var(--theme-accent-rgb), 0.08);
 }
 
 .layout-option-preview {
@@ -3174,9 +3179,9 @@ body.ipaste-preserve-current-app .global-tooltip,
 
 .sync-hint {
   margin: 0;
-  border: 1px solid #bfdbfe;
+  border: 1px solid var(--theme-accent-border);
   border-radius: 0.75rem;
-  background: #eff6ff;
+  background: var(--theme-accent-soft);
   padding: 0.75rem 0.875rem;
   color: #475569;
   font-size: 0.8125rem;
@@ -3201,9 +3206,9 @@ body.ipaste-preserve-current-app .global-tooltip,
 }
 
 .settings-icon-button:hover {
-  border-color: #99f6e4;
-  background: #f0fdfa;
-  color: #0f766e;
+  border-color: var(--theme-accent-border);
+  background: var(--theme-accent-soft);
+  color: var(--theme-accent-hover);
 }
 
 .settings-field {
@@ -3234,8 +3239,8 @@ body.ipaste-preserve-current-app .global-tooltip,
 }
 
 .settings-field input:focus {
-  border-color: #0d9488;
-  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.12);
+  border-color: var(--theme-accent);
+  box-shadow: 0 0 0 3px rgba(var(--theme-accent-rgb), 0.12);
   outline: none;
 }
 
@@ -3283,20 +3288,20 @@ body.ipaste-preserve-current-app .global-tooltip,
 }
 
 .settings-action-button:hover {
-  border-color: #99f6e4;
-  background: #f0fdfa;
-  color: #0f766e;
+  border-color: var(--theme-accent-border);
+  background: var(--theme-accent-soft);
+  color: var(--theme-accent-hover);
 }
 
 .settings-action-button-primary {
-  border-color: #0f766e;
-  background: #0f766e;
+  border-color: var(--theme-accent);
+  background: var(--theme-accent);
   color: #ffffff;
 }
 
 .settings-action-button-primary:hover {
-  border-color: #115e59;
-  background: #115e59;
+  border-color: var(--theme-accent-hover);
+  background: var(--theme-accent-hover);
   color: #ffffff;
 }
 
@@ -3342,12 +3347,12 @@ body.ipaste-preserve-current-app .global-tooltip,
 
 .language-select-trigger:hover,
 .language-select-open .language-select-trigger {
-  border-color: #99f6e4;
-  background: #f8fffd;
-  color: #0f766e;
+  border-color: var(--theme-accent-border);
+  background: var(--theme-accent-soft);
+  color: var(--theme-accent-hover);
   box-shadow:
     0 1px 2px rgba(15, 23, 42, 0.06),
-    0 0 0 3px rgba(20, 184, 166, 0.1);
+    0 0 0 3px rgba(var(--theme-accent-rgb), 0.1);
 }
 
 .language-select-value {
@@ -3423,13 +3428,13 @@ body.ipaste-preserve-current-app .global-tooltip,
 
 .language-select-option:hover,
 .language-select-option-active {
-  background: #f0fdfa;
-  color: #0f766e;
+  background: var(--theme-accent-soft);
+  color: var(--theme-accent-hover);
 }
 
 .language-select-option-selected {
-  background: #ecfdf5;
-  color: #0f766e;
+  background: var(--theme-accent-selected);
+  color: var(--theme-accent-hover);
 }
 
 .language-select-popover-enter-active,
@@ -3483,10 +3488,10 @@ body.ipaste-preserve-current-app .global-tooltip,
 
 .shortcut-capture-button:hover,
 .shortcut-capture-button-recording {
-  border-color: #0d9488;
-  background: #f0fdfa;
-  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
-  color: #0f766e;
+  border-color: var(--theme-accent);
+  background: var(--theme-accent-soft);
+  box-shadow: 0 0 0 3px rgba(var(--theme-accent-rgb), 0.1);
+  color: var(--theme-accent-hover);
 }
 
 .settings-shortcut-list {
@@ -3621,14 +3626,14 @@ body.ipaste-preserve-current-app .global-tooltip,
   align-items: center;
   gap: 0.375rem;
   border-radius: 0.375rem;
-  color: #0f766e;
+  color: var(--theme-accent-hover);
   font-size: 0.875rem;
   font-weight: 700;
   transition: color 160ms ease;
 }
 
 .about-repository-link:hover {
-  color: #115e59;
+  color: var(--theme-accent-text);
 }
 
 .about-repository-link span {
@@ -3684,8 +3689,8 @@ body.ipaste-preserve-current-app .global-tooltip,
   flex: 0 0 auto;
   place-items: center;
   border-radius: 0.625rem;
-  background: #e0f2fe;
-  color: #0369a1;
+  background: var(--theme-accent-soft);
+  color: var(--theme-accent-hover);
 }
 
 .about-update-icon-error {
@@ -3704,11 +3709,11 @@ body.ipaste-preserve-current-app .global-tooltip,
   display: inline-flex;
   min-height: 1.375rem;
   align-items: center;
-  border: 1px solid #ddd6fe;
+  border: 1px solid var(--theme-accent-border);
   border-radius: 999px;
   background: #ffffff;
   padding: 0 0.5rem;
-  color: #6d28d9;
+  color: var(--theme-accent-hover);
   font-size: 0.75rem;
   font-weight: 700;
   line-height: 1;
@@ -3731,8 +3736,8 @@ body.ipaste-preserve-current-app .global-tooltip,
 .about-update-button-downloading,
 .about-update-button-downloading:hover {
   border-color: transparent;
-  background: #ecfdf5;
-  color: #0f766e;
+  background: var(--theme-accent-soft);
+  color: var(--theme-accent-hover);
 }
 
 .update-spin {
@@ -4754,10 +4759,10 @@ body.ipaste-preserve-current-app .global-tooltip,
 }
 
 .segmented-option-active {
-  background: #ecfdf5;
-  color: #0f766e;
+  background: var(--theme-accent-selected);
+  color: var(--theme-accent-hover);
   box-shadow:
-    inset 0 0 0 1px rgba(13, 148, 136, 0.34),
+    inset 0 0 0 1px rgba(var(--theme-accent-rgb), 0.34),
     0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
@@ -4786,8 +4791,8 @@ body.ipaste-preserve-current-app .global-tooltip,
 }
 
 .switch-control-active {
-  background: #0d9488;
-  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.12);
+  background: var(--theme-accent);
+  box-shadow: 0 0 0 3px rgba(var(--theme-accent-rgb), 0.12);
 }
 
 .switch-control-active span {
@@ -4800,9 +4805,9 @@ body.ipaste-preserve-current-app .global-tooltip,
 }
 
 .permission-guide {
-  border: 1px solid #bfdbfe;
+  border: 1px solid var(--theme-accent-border);
   border-radius: 0.875rem;
-  background: #eff6ff;
+  background: var(--theme-accent-soft);
   padding: 1rem;
 }
 
@@ -4816,15 +4821,15 @@ body.ipaste-preserve-current-app .global-tooltip,
   padding: 0 0.625rem;
   font-size: 0.8125rem;
   font-weight: 600;
-  color: #0369a1;
+  color: var(--theme-accent-hover);
   transition:
     background-color 160ms ease,
     color 160ms ease;
 }
 
 .permission-link:hover {
-  background: #dbeafe;
-  color: #075985;
+  background: var(--theme-accent-selected);
+  color: var(--theme-accent-text);
 }
 
 @media (max-width: 900px) {
