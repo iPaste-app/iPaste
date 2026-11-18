@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -9,51 +9,41 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 const runtimeVersion = "1.29.0";
-const archiveName = `onnxruntime-win-x64-${runtimeVersion}.zip`;
-const archiveUrl = `https://github.com/microsoft/onnxruntime/releases/download/v${runtimeVersion}/${archiveName}`;
-const archiveRoot = `onnxruntime-win-x64-${runtimeVersion}`;
+const archiveName = `microsoft.ml.onnxruntime.${runtimeVersion}.nupkg`;
+const archiveUrl = `https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/${runtimeVersion}/${archiveName}`;
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDir, "..");
 const runtimeDir = path.join(projectRoot, "src-tauri", "runtime", "windows-x64");
-const runtimeBinaries = [
+const runtimeFiles = [
   {
     name: "onnxruntime.dll",
-    source: "lib/onnxruntime.dll",
+    source: "runtimes/win-x64/native/onnxruntime.dll",
     size: 16_149_344,
     sha256: "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471",
   },
   {
     name: "onnxruntime_providers_shared.dll",
-    source: "lib/onnxruntime_providers_shared.dll",
+    source: "runtimes/win-x64/native/onnxruntime_providers_shared.dll",
     size: 21_856,
     sha256: "87f6878cdc1f80b3a9afa5b0c84663315030b4957f5bbb6b66470557cb2f48d8",
   },
-];
-const runtimeNotices = [
   {
     name: "ONNX_RUNTIME_LICENSE.txt",
     source: "LICENSE",
-    url: `https://raw.githubusercontent.com/microsoft/onnxruntime/v${runtimeVersion}/LICENSE`,
-    size: 1_073,
-    sha256: "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+    size: 1_094,
+    sha256: "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674",
   },
   {
     name: "ONNX_RUNTIME_THIRD_PARTY_NOTICES.txt",
     source: "ThirdPartyNotices.txt",
-    url: `https://raw.githubusercontent.com/microsoft/onnxruntime/v${runtimeVersion}/ThirdPartyNotices.txt`,
-    size: 336_906,
-    sha256: "53d3fa5821ac016ac24dd35775c996efec86e2ae0841e9a3a5e146c0ae916845",
+    size: 343_249,
+    sha256: "4c5b864d8974c94b37461f38163facef79a1bb5dea461667ee9e5be6a8e73f83",
   },
 ];
-const runtimeFiles = [...runtimeBinaries, ...runtimeNotices];
 
 if (process.platform !== "win32") {
   console.log("ONNX Runtime preparation is only required for Windows builds; skipping.");
   process.exit(0);
-}
-
-if (await filesAreReady(runtimeBinaries)) {
-  await prepareRuntimeNotices();
 }
 
 if (await filesAreReady(runtimeFiles)) {
@@ -70,15 +60,15 @@ try {
   await downloadToFile(archiveUrl, archivePath);
   await mkdir(extractDir, { recursive: true });
 
-  const archiveEntries = runtimeBinaries.map(({ source }) => `${archiveRoot}/${source}`);
+  const archiveEntries = runtimeFiles.map(({ source }) => source);
   execFileSync("tar", ["-xf", archivePath, "-C", extractDir, ...archiveEntries], {
     stdio: "inherit",
     windowsHide: true,
   });
 
   await mkdir(runtimeDir, { recursive: true });
-  for (const file of runtimeBinaries) {
-    const extractedPath = path.join(extractDir, archiveRoot, ...file.source.split("/"));
+  for (const file of runtimeFiles) {
+    const extractedPath = path.join(extractDir, ...file.source.split("/"));
     await verifyFile(extractedPath, file);
     await copyFile(extractedPath, path.join(runtimeDir, file.name));
   }
@@ -86,7 +76,6 @@ try {
   await rm(tempRoot, { recursive: true, force: true });
 }
 
-await prepareRuntimeNotices();
 if (!(await filesAreReady(runtimeFiles))) {
   throw new Error(`ONNX Runtime ${runtimeVersion} preparation did not complete.`);
 }
@@ -100,19 +89,6 @@ async function filesAreReady(files) {
     return true;
   } catch {
     return false;
-  }
-}
-
-async function prepareRuntimeNotices() {
-  await mkdir(runtimeDir, { recursive: true });
-  for (const file of runtimeNotices) {
-    const targetPath = path.join(runtimeDir, file.name);
-    if (await filesAreReady([file])) continue;
-
-    const response = await fetchWithRetry(file.url);
-    const content = Buffer.from(await response.arrayBuffer());
-    await writeFile(targetPath, content);
-    await verifyFile(targetPath, file);
   }
 }
 
