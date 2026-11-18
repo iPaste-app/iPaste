@@ -1,7 +1,9 @@
 import { ocrMessages } from "../../locales/ocr";
+import { lanShareMessages } from "../../locales/lanShare";
 import type { I18nKey } from "./en";
 
 export const de = {
+  ...lanShareMessages.de,
   "language.english": "Englisch",
   "language.chineseSimplified": "Vereinfachtes Chinesisch",
   "language.japanese": "Japanisch",
@@ -156,6 +158,9 @@ export const de = {
   "settings.shortcuts.global.title": "Globaler Öffnen-Kurzbefehl",
   "settings.shortcuts.global.description": "Öffne das iPaste-Panel aus anderen Apps.",
   "settings.shortcuts.recording": "Drücke einen neuen Kurzbefehl",
+  "settings.shortcuts.unset": "Kein Kurzbefehl festgelegt",
+  "settings.shortcuts.conflict": "{shortcut} ist bereits belegt. Versuche eine andere Tastenkombination.",
+  "settings.shortcuts.updateFailed": "Der Kurzbefehl konnte nicht aktualisiert werden. Bitte versuche es erneut.",
   "settings.shortcuts.restoreDefault": "Standard wiederherstellen",
   "settings.shortcuts.panel.title": "Panel-Kurzbefehle",
   "settings.shortcuts.panel.description": "Zahlenkurzbefehle folgen der aktuellen Kategorie-Reihenfolge. Der Verlauf ist immer zuerst.",

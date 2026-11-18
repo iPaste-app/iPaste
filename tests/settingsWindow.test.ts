@@ -108,6 +108,143 @@ test("application center shortcut records and saves independently, restoring nat
   } finally { f.preferences.resolve(); f.app.unmount(); }
 });
 
+for (const navigation of [{ initialTab: "shortcuts" }, { queuedTarget: "shortcuts" }] as const) {
+  test(`shortcut conflict opens the shortcuts page via ${Object.keys(navigation)[0]} with unset bindings`, async () => {
+    const f = fixture(navigation);
+    try {
+      state.store.shortcut = "";
+      state.store.appCenterShortcut = "";
+      f.preferences.resolve();
+      await flush();
+      assert.equal(text(all(f.root, el => hasClass(el, "settings-tab-active"))[0]), "settings.tabs.shortcuts");
+      const recorders = all(f.root, el => hasClass(el, "shortcut-capture-button"));
+      assert.deepEqual(recorders.map(text), ["settings.shortcuts.unset", "settings.shortcuts.unset"]);
+      assert.equal(state.ocrMounts, 0);
+      assert.deepEqual(state.shortcutWrites, [], "loading an unset binding must not save defaults");
+    } finally { f.preferences.resolve(); f.autostart.resolve(false); f.app.unmount(); }
+  });
+}
+
+test("shortcut recovery navigates an existing settings window and clears only the affected recorder", async () => {
+  const f = fixture();
+  try {
+    f.preferences.resolve();
+    await flush();
+    await f.select("about");
+    state.store.appCenterShortcut = "";
+    state.settingsTarget = "shortcuts";
+    state.settingsListener();
+    await flush();
+    const recorders = all(f.root, el => hasClass(el, "shortcut-capture-button"));
+    assert.deepEqual(recorders.map(text), ["CommandOrControl+Shift+V", "settings.shortcuts.unset"]);
+    assert.equal(state.settingsTarget, null);
+  } finally { f.preferences.resolve(); f.autostart.resolve(false); f.app.unmount(); }
+});
+
+test("an unset application center shortcut can be recorded and saved without restoring its default", async () => {
+  const f = fixture({ initialTab: "shortcuts" });
+  try {
+    state.store.appCenterShortcut = "";
+    f.preferences.resolve();
+    await flush();
+    const section = all(f.root, el => el.tag === "section" && hasClass(el, "settings-shortcuts-item") && text(el).includes("settings.shortcuts.appCenter.title"))[0];
+    assert.equal(text(all(section, el => hasClass(el, "shortcut-capture-button"))[0]), "settings.shortcuts.unset");
+    await all(section, el => hasClass(el, "shortcut-capture-button"))[0].props.onClick();
+    state.keyListeners.get("keydown")({
+      key: "m", code: "KeyM", ctrlKey: true, shiftKey: true, altKey: false, metaKey: false,
+      preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {},
+    });
+    await flush();
+    await button(section, "common.save").props.onClick();
+    assert.deepEqual(state.shortcutWrites, [["appCenter", "Control+Shift+M"]]);
+    assert.equal(state.store.shortcut, "CommandOrControl+Shift+V");
+  } finally { f.preferences.resolve(); f.autostart.resolve(false); f.app.unmount(); }
+});
+
+test("saving waits for recording recovery and preserves the replacement when the old binding is cleared", async () => {
+  const f = fixture({ initialTab: "shortcuts" });
+  const restored = deferred();
+  try {
+    f.preferences.resolve();
+    await flush();
+    state.api.setAppShortcutEnabled = async enabled => {
+      state.shortcutToggles.push(enabled);
+      if (enabled) {
+        await restored.promise;
+        state.store.appCenterShortcut = "";
+      }
+    };
+    const section = all(f.root, el => el.tag === "section" && hasClass(el, "settings-shortcuts-item") && text(el).includes("settings.shortcuts.appCenter.title"))[0];
+    await all(section, el => hasClass(el, "shortcut-capture-button"))[0].props.onClick();
+    state.keyListeners.get("keydown")({
+      key: "m", code: "KeyM", ctrlKey: true, shiftKey: true, altKey: false, metaKey: false,
+      preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {},
+    });
+    await flush();
+    const saveButton = button(section, "common.save");
+    const save = saveButton.props.onClick();
+    await saveButton.props.onClick();
+    await flush();
+    assert.deepEqual(state.shortcutWrites, []);
+    assert.deepEqual(state.shortcutToggles, [false, true], "save shares the pending restore operation");
+    restored.resolve();
+    await save;
+    await nextTick();
+    assert.deepEqual(state.shortcutWrites, [["appCenter", "Control+Shift+M"]], "concurrent clicks must only save once");
+    assert.equal(text(all(section, el => hasClass(el, "shortcut-capture-button"))[0]), "Control+Shift+M");
+  } finally { restored.resolve(); f.preferences.resolve(); f.autostart.resolve(false); f.app.unmount(); }
+});
+
+test("a failed recording recovery blocks saving until recovery can be retried", async (context) => {
+  context.mock.method(console, "error", () => {});
+  const f = fixture({ initialTab: "shortcuts" });
+  try {
+    f.preferences.resolve();
+    await flush();
+    state.api.setAppShortcutEnabled = async enabled => {
+      state.shortcutToggles.push(enabled);
+      if (enabled) throw new Error("recovery unavailable");
+    };
+    const section = all(f.root, el => el.tag === "section" && hasClass(el, "settings-shortcuts-item") && text(el).includes("settings.shortcuts.appCenter.title"))[0];
+    await all(section, el => hasClass(el, "shortcut-capture-button"))[0].props.onClick();
+    state.keyListeners.get("keydown")({
+      key: "m", code: "KeyM", ctrlKey: true, shiftKey: true, altKey: false, metaKey: false,
+      preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {},
+    });
+    await flush();
+    await button(section, "common.save").props.onClick();
+    await nextTick();
+    assert.deepEqual(state.shortcutWrites, []);
+    assert.ok(text(section).includes("settings.shortcuts.updateFailed"));
+    assert.ok(!text(section).includes("recovery unavailable"));
+    state.api.setAppShortcutEnabled = async enabled => { state.shortcutToggles.push(enabled); };
+    await button(section, "common.save").props.onClick();
+    assert.deepEqual(state.shortcutWrites, [["appCenter", "Control+Shift+M"]]);
+  } finally { f.preferences.resolve(); f.autostart.resolve(false); f.app.unmount(); }
+});
+
+test("shortcut conflicts hide native IDs and modifier details while retaining diagnostic logs", async (context) => {
+  const log = context.mock.method(console, "error", () => {});
+  const f = fixture({ initialTab: "shortcuts" });
+  const nativeError = "无法注册快捷键 CommandOrControl+Shift+A：HotKey already registered: HotKey { mods: Modifiers(CONTROL | SHIFT), key: KeyA, id: 34078739 }。请换一个未被系统或其他应用占用的组合。";
+  try {
+    state.store.appCenterShortcut = "";
+    f.preferences.resolve();
+    await flush();
+    const section = all(f.root, el => el.tag === "section" && hasClass(el, "settings-shortcuts-item") && text(el).includes("settings.shortcuts.appCenter.title"))[0];
+    state.store.updateAppCenterShortcut = async () => { throw nativeError; };
+    button(section, "settings.shortcuts.restoreDefault").props.onClick();
+    await nextTick();
+    await button(section, "common.save").props.onClick();
+    await nextTick();
+    const message = text(all(section, el => hasClass(el, "settings-message-error"))[0]);
+    assert.equal(message, "Ctrl + Shift + A 已被占用，请尝试其他组合。");
+    assert.doesNotMatch(message, /34078739|HotKey|Modifiers|KeyA|CommandOrControl/);
+    assert.equal(state.store.appCenterShortcut, "");
+    assert.equal(log.mock.calls[0].arguments[1], nativeError);
+  } finally { f.preferences.resolve(); f.autostart.resolve(false); f.app.unmount(); }
+});
+
 test("application center rejects the panel shortcut even when modifier aliases differ", async () => {
   const f = fixture();
   try {
@@ -128,11 +265,11 @@ test("application center rejects the panel shortcut even when modifier aliases d
   } finally { f.preferences.resolve(); f.app.unmount(); }
 });
 
-function fixture(options: { initialTab?: "ocr"; queuedTarget?: "ocr" } = {}) {
+function fixture(options: { initialTab?: "ocr" | "shortcuts"; queuedTarget?: "ocr" | "shortcuts" } = {}) {
   const preferences = deferred(), autostart = deferred<boolean>();
   let preferenceReads = 0, autostartReads = 0, snapshotReads = 0;
   state.ocrMounts = 0;
-  window.location.search = options.initialTab ? "?window=settings&tab=ocr" : "?window=settings";
+  window.location.search = options.initialTab ? `?window=settings&tab=${options.initialTab}` : "?window=settings";
   state.settingsTarget = options.queuedTarget ?? null;
   state.settingsListener = null;
   state.listen = async (event, listener) => {
@@ -160,6 +297,7 @@ function fixture(options: { initialTab?: "ocr"; queuedTarget?: "ocr" } = {}) {
     appCenterShortcut: "CommandOrControl+Shift+A",
     async updateShortcut(value) { state.shortcutWrites.push(["panel", value]); this.shortcut = value; },
     async updateAppCenterShortcut(value) { state.shortcutWrites.push(["appCenter", value]); this.appCenterShortcut = value; },
+    async setAppShortcutEnabled(enabled) { await state.api.setAppShortcutEnabled(enabled); },
     async loadSettings() { preferenceReads++; await preferences.promise; },
     async load() { snapshotReads++; },
   });

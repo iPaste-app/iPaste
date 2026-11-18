@@ -2,7 +2,7 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import { AlertCircle, CheckCircle2, ChevronRight, ClipboardCopy, CornerDownLeft, FolderInput, Inbox, Pencil, Plus, TextCursorInput, Trash2, X } from "lucide-vue-next";
+import { AlertCircle, CheckCircle2, ChevronRight, ClipboardCopy, CornerDownLeft, FolderInput, Inbox, Pencil, Plus, Share2, TextCursorInput, Trash2, X } from "lucide-vue-next";
 import AppCenterView from "./components/AppCenterView.vue";
 import CategoryRail from "./components/CategoryRail.vue";
 import ClipCard from "./components/ClipCard.vue";
@@ -12,6 +12,7 @@ import SettingsWindow from "./components/SettingsWindow.vue";
 import StarPrompt from "./components/StarPrompt.vue";
 import TopBar from "./components/TopBar.vue";
 import UpdateDialog from "./components/UpdateDialog.vue";
+import LanShareDialog from "./components/LanShareDialog.vue";
 import { useUpdater } from "./composables/useUpdater";
 import { usePanelViewport } from "./composables/usePanelViewport";
 import { useElementWidth } from "./composables/useElementWidth";
@@ -33,6 +34,10 @@ import type { Category, ClipViewItem } from "./types";
 const CATEGORY_COLORS = ["#0D9488", "#2563EB", "#7C3AED", "#D97706", "#DC2626", "#475569"];
 const store = useIpasteStore();
 const updater = useUpdater();
+const shareItem = ref<ClipViewItem | null>(null);
+const shareDialog = ref<InstanceType<typeof LanShareDialog> | null>(null);
+const showShareEnded = ref(false);
+let shareEndedTimer: ReturnType<typeof setTimeout> | undefined;
 const windowSearchParams = new URLSearchParams(window.location.search);
 const isSettingsWindow = windowSearchParams.get("window") === "settings";
 const isClipViewerWindow = windowSearchParams.get("window") === "clip-viewer";
@@ -252,6 +257,8 @@ onUnmounted(() => {
   if (isClipViewerWindow) return;
   if (isSettingsWindow) return;
 
+  clearShareEndedMessage();
+
   document.removeEventListener("keydown", handleKeydown, true);
   document.removeEventListener("keyup", handleKeyup, true);
   document.removeEventListener("selectionchange", handleSelectionChange);
@@ -307,6 +314,7 @@ function applyPanelVisibility(
   const nativePanel = payload.visible && Boolean(payload.nativePanel);
   isPreservingCurrentApp.value = payload.visible && payload.preservesCurrentApp && !nativePanel;
   if (!payload.visible) {
+    clearShareEndedMessage();
     void flushSize();
     clearStarPromptTimer();
     clearStarThanksTimer();
@@ -514,6 +522,27 @@ async function copyContextItem() {
   closeFloatingLayers();
   if (!item) return;
   await store.copyItem(item);
+}
+
+function shareContextItem() {
+  const item = contextMenu.value?.item;
+  closeFloatingLayers();
+  clearShareEndedMessage();
+  if (item) shareItem.value = item;
+}
+
+function clearShareEndedMessage() {
+  clearTimeout(shareEndedTimer);
+  shareEndedTimer = undefined;
+  showShareEnded.value = false;
+}
+
+function handleShareEnded() {
+  shareItem.value = null;
+  clearShareEndedMessage();
+  if (!isPanelVisible) return;
+  showShareEnded.value = true;
+  shareEndedTimer = setTimeout(clearShareEndedMessage, 1800);
 }
 
 async function copyContextFilePath() {
@@ -916,6 +945,14 @@ async function openClipViewer(item: ClipViewItem) {
 function handleKeydown(event: KeyboardEvent) {
   if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
 
+  if (shareItem.value) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      shareItem.value = null;
+    }
+    return;
+  }
+
   if (updater.updateDialogOpen.value) {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -1023,6 +1060,11 @@ function hasQuickPreviewModifier(event: KeyboardEvent) {
 type PanelKey = "ArrowDown" | "ArrowUp" | "ArrowRight" | "ArrowLeft" | "Enter" | "Escape";
 
 function handlePanelKey(key: string) {
+  if (shareItem.value) {
+    if (key === "Escape") shareItem.value = null;
+    if (key === "Enter") shareDialog.value?.handleNativeEnter();
+    return true;
+  }
   if (updater.updateDialogOpen.value) {
     if (key === "Escape") updater.dismissUpdateDialog();
     return true;
@@ -1349,6 +1391,15 @@ function scrollSelectedClipIntoView() {
         />
       </div>
 
+      <LanShareDialog v-if="shareItem" ref="shareDialog" :item="shareItem" @dismiss="shareItem = null" @ended="handleShareEnded" />
+
+      <Transition name="share-ended-toast">
+        <div v-if="showShareEnded" class="share-ended-toast" role="status" aria-live="polite">
+          <CheckCircle2 class="size-4" aria-hidden="true" />
+          <span>{{ t("share.ended") }}</span>
+        </div>
+      </Transition>
+
       <UpdateDialog
         :open="updater.updateDialogOpen.value"
         :status="updater.updateStatus.value"
@@ -1584,6 +1635,10 @@ function scrollSelectedClipIntoView() {
       <button type="button" class="context-menu-item" tabindex="-1" role="menuitem" @click="copyContextItem">
         <ClipboardCopy class="size-4" />
         <span>{{ t("common.copy") }}</span>
+      </button>
+      <button type="button" class="context-menu-item" tabindex="-1" role="menuitem" @click="shareContextItem">
+        <Share2 class="size-4" />
+        <span>{{ t("share.title") }}</span>
       </button>
       <button v-if="contextMenu.item.clipType === 'file'" type="button" class="context-menu-item" tabindex="-1" role="menuitem" @click="copyContextFilePath">
         <TextCursorInput class="size-4" />

@@ -105,6 +105,7 @@ export type ClipPage = {
 };
 
 export type AppSettings = {
+  // An empty string means the shortcut is not configured.
   shortcut: string;
   appCenterShortcut: string;
   retentionDays: number;
@@ -115,6 +116,8 @@ export type AppSettings = {
   language: Language;
   cloud: CloudSettings;
 };
+
+export type SettingsTarget = "ocr" | "shortcuts";
 
 export type AppInfo = {
   version: string;

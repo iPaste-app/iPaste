@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="referrer" content="no-referrer">
+    <title>iPaste</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="__SHARE_BASE__/page.css">
+    <script type="module" src="__SHARE_BASE__/page.js"></script>
+  </head>
+  <body>
+    <main>
+      <header><span class="brand">iPaste</span><span id="expiry"></span></header>
+      <section id="content" hidden>
+        <h1 id="name" hidden></h1>
+        <textarea id="text" readonly spellcheck="false" hidden></textarea>
+        <img id="image" alt="" hidden>
+        <p id="size" hidden></p>
+      </section>
+      <p id="message" role="status" aria-live="polite"></p>
+      <div id="actions" class="actions" hidden>
+        <button id="copy" type="button" hidden></button>
+        <a id="download" download hidden></a>
+      </div>
+    </main>
+  </body>
+</html>

@@ -24,6 +24,7 @@ It is built for people who move between chat, browsers, terminals, design tools,
 - Saved categories: keep reusable snippets for code, commands, addresses, reply templates, prompts, and more.
 - Image viewer: preview, zoom, rotate, copy back to the clipboard, and extract text with OCR.
 - Append copy: temporarily merge several text copies into one snippet while gathering material.
+- LAN sharing: right-click text, an image, or a file to share it by QR code or link. Recipients can copy or download in their browser. One item at a time; sharing continues after closing the dialog and ends automatically after five minutes.
 - Configurable preferences: retention period, panel layout, default open behavior, global shortcut, language, and OCR mode.
 - Optional self-hosted sync: sync only saved categories and saved text-like content; raw clipboard history stays local.
 - Signed updates: built-in Tauri updater support for releases distributed through GitHub Releases or Cloudflare R2.

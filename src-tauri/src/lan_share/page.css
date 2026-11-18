@@ -1,0 +1,26 @@
+:root { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #17212e; background: #f7f8fa; color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { width: min(100%, 800px); margin: 0 auto; padding: 28px 24px 40px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 28px; }
+.brand { font-weight: 750; font-size: 18px; letter-spacing: -0.5px; }
+#expiry { color: #737d8b; font-size: 13px; font-variant-numeric: tabular-nums; }
+h1 { font-size: 18px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; margin: 0 0 16px; }
+textarea { display: block; width: 100%; min-height: 240px; height: min(58dvh, 620px); resize: vertical; padding: 18px; border: 1px solid #e1e5eb; border-radius: 12px; background: #fff; color: inherit; font: 15px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; tab-size: 2; }
+textarea:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid #0d9488; outline-offset: 3px; }
+img { display: block; max-width: 100%; max-height: 65dvh; margin: 0 auto; object-fit: contain; border-radius: 8px; }
+#size, #message { font-size: 14px; line-height: 1.6; color: #687282; overflow-wrap: anywhere; }
+#message:empty { display: none; }
+.actions { display: flex; justify-content: flex-end; margin-top: 20px; }
+button, .actions a { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 116px; padding: 10px 20px; border: 0; border-radius: 9px; color: #fff; background: #2563eb; font-family: inherit; font-size: 15px; font-weight: 600; line-height: 1.4; text-decoration: none; cursor: pointer; }
+button:active, .actions a:active { transform: scale(0.98); }
+button:disabled { opacity: 0.55; cursor: default; }
+[hidden] { display: none !important; }
+@media (max-width: 600px) {
+  main { padding: 20px 16px calc(100px + env(safe-area-inset-bottom)); }
+  header { margin-bottom: 20px; }
+  textarea { font-size: 16px; }
+  .actions { position: fixed; bottom: 0; left: 0; right: 0; margin: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); background: #f7f8fa; border-top: 1px solid #e1e5eb; }
+  .actions:empty { display: none; }
+  .actions button, .actions a { width: 100%; }
+}

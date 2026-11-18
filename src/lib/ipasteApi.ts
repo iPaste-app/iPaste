@@ -20,6 +20,7 @@ import type {
   MfaAccountInput,
   OcrMode,
   OcrInstallStatus,
+  SettingsTarget,
   StarPromptState,
 } from "../types";
 
@@ -536,7 +537,7 @@ export const ipasteApi = {
     });
   },
   setAppShortcutEnabled(enabled: boolean) {
-    return call<boolean>("set_app_shortcut_enabled", { enabled }, enabled);
+    return call<AppSettings>("set_app_shortcut_enabled", { enabled }, mockSnapshot.settings);
   },
   updatePanelOpenBehavior(behavior: AppSettings["panelOpenBehavior"]) {
     return call<AppSettings>("update_panel_open_behavior", { behavior }, {
@@ -685,11 +686,11 @@ export const ipasteApi = {
   showPanel() {
     return call<void>("show_panel");
   },
-  showSettings(tab?: "ocr") {
+  showSettings(tab?: SettingsTarget) {
     return call<void>("show_settings", tab ? { tab } : undefined);
   },
   takeSettingsTarget() {
-    return call<"ocr" | null>("take_settings_target", undefined, null);
+    return call<SettingsTarget | null>("take_settings_target", undefined, null);
   },
   hidePanel() {
     return call<void>("hide_panel");

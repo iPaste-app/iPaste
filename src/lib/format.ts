@@ -4,7 +4,9 @@ import { clipFileExtension } from "./clipFile";
 
 export function formatShortcut(shortcut: string) {
   return shortcut
-    .replace("CommandOrControl", platformModifier())
+    .replace(/CommandOrControl|CmdOrCtrl/g, platformModifier())
+    .replace(/\bControl\b/g, "Ctrl")
+    .replace(/\bCommand\b/g, "Cmd")
     .split("+")
     .join(" + ");
 }

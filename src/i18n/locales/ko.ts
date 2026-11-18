@@ -1,7 +1,9 @@
 import { ocrMessages } from "../../locales/ocr";
+import { lanShareMessages } from "../../locales/lanShare";
 import type { I18nKey } from "./en";
 
 export const ko = {
+  ...lanShareMessages.ko,
   "language.english": "영어",
   "language.chineseSimplified": "중국어 간체",
   "language.japanese": "일본어",
@@ -156,6 +158,9 @@ export const ko = {
   "settings.shortcuts.global.title": "글로벌 열기 바로 가기",
   "settings.shortcuts.global.description": "다른 앱에서 iPaste 패널을 엽니다.",
   "settings.shortcuts.recording": "새 단축키를 누르세요",
+  "settings.shortcuts.unset": "단축키 미설정",
+  "settings.shortcuts.conflict": "{shortcut}은(는) 이미 사용 중입니다. 다른 키 조합을 시도해 주세요.",
+  "settings.shortcuts.updateFailed": "단축키를 변경하지 못했습니다. 다시 시도해 주세요.",
   "settings.shortcuts.restoreDefault": "기본값 복원",
   "settings.shortcuts.panel.title": "패널 바로 가기",
   "settings.shortcuts.panel.description": "숫자 단축키는 현재 카테고리 순서를 따릅니다. 역사는 항상 최우선입니다.",

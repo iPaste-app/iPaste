@@ -1,7 +1,9 @@
 import { ocrMessages } from "../../locales/ocr";
+import { lanShareMessages } from "../../locales/lanShare";
 import type { I18nKey } from "./en";
 
 export const zhCN = {
+  ...lanShareMessages["zh-CN"],
   "language.english": "英语",
   "language.chineseSimplified": "简体中文",
   "language.japanese": "日语",
@@ -164,6 +166,9 @@ export const zhCN = {
   "settings.shortcuts.global.title": "全局唤出快捷键",
   "settings.shortcuts.global.description": "用于从其他应用打开 iPaste 面板。",
   "settings.shortcuts.recording": "按下新的快捷键",
+  "settings.shortcuts.unset": "未设置快捷键",
+  "settings.shortcuts.conflict": "{shortcut} 已被占用，请尝试其他组合。",
+  "settings.shortcuts.updateFailed": "暂时无法更新快捷键，请重试。",
   "settings.shortcuts.restoreDefault": "恢复默认",
   "settings.shortcuts.panel.title": "面板快捷键",
   "settings.shortcuts.panel.description": "数字快捷键按当前分类栏顺序生效，历史记录固定为第 1 位。",

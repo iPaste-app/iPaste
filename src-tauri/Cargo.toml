@@ -1,6 +1,6 @@
 [package]
 name = "ipaste"
-version = "0.2.17"
+version = "0.2.18"
 description = "A local-first tray clipboard manager for macOS and Windows."
 authors = ["iPaste Contributors"]
 license = "Apache-2.0"
@@ -20,9 +20,13 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 arboard = "3.6.1"
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
 base64 = "0.22.1"
 chrono = { version = "0.4", features = ["serde"] }
 enigo = "0.6.1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+local-ip-address = "0.6"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif", "ico"] }
 reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "json", "rustls"] }
 rusqlite = { version = "=0.32.1", features = ["bundled"] }
@@ -34,7 +38,9 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1.52.3", features = ["rt-multi-thread", "sync"] }
+tempfile = "3"
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "sync", "net", "time", "fs", "io-util", "macros"] }
+tokio-util = { version = "0.7", features = ["io", "rt"] }
 uuid = { version = "1", features = ["v4"] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
@@ -54,6 +60,8 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 # development responsive without dropping debug symbols or optimizing all UI dependencies.
 [profile.dev.package.ipaste]
 opt-level = 2
+# Avoid unresolved generated drop symbols in optimized Windows library builds.
+incremental = false
 
 # Keep native timing regressions representative of the development app.
 [profile.test.package.ipaste]

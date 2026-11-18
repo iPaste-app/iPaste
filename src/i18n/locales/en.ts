@@ -1,6 +1,8 @@
 import { ocrMessages } from "../../locales/ocr";
+import { lanShareMessages } from "../../locales/lanShare";
 
 export const en = {
+  ...lanShareMessages.en,
   "language.english": "English",
   "language.chineseSimplified": "Simplified Chinese",
   "language.japanese": "Japanese",
@@ -163,6 +165,9 @@ export const en = {
   "settings.shortcuts.global.title": "Global open shortcut",
   "settings.shortcuts.global.description": "Open the iPaste panel from other apps.",
   "settings.shortcuts.recording": "Press a new shortcut",
+  "settings.shortcuts.unset": "No shortcut set",
+  "settings.shortcuts.conflict": "{shortcut} is already in use. Try a different combination.",
+  "settings.shortcuts.updateFailed": "Couldn't update the shortcut. Please try again.",
   "settings.shortcuts.restoreDefault": "Restore default",
   "settings.shortcuts.panel.title": "Panel shortcuts",
   "settings.shortcuts.panel.description": "Number shortcuts follow the current category order. History is always first.",

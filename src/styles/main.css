@@ -420,7 +420,8 @@ body.ipaste-preserve-current-app .global-tooltip,
   opacity: 0.56;
 }
 
-.star-thanks-toast {
+.star-thanks-toast,
+.share-ended-toast {
   position: fixed;
   top: 4.5rem;
   right: 1rem;
@@ -451,6 +452,16 @@ body.ipaste-preserve-current-app .global-tooltip,
 .star-thanks-toast-leave-to {
   opacity: 0;
   transform: translateY(-0.25rem);
+}
+
+.share-ended-toast-enter-active,
+.share-ended-toast-leave-active {
+  transition: opacity 160ms ease;
+}
+
+.share-ended-toast-enter-from,
+.share-ended-toast-leave-to {
+  opacity: 0;
 }
 
 .star-prompt-enter-active,

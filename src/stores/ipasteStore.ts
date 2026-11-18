@@ -529,6 +529,11 @@ export const useIpasteStore = defineStore("ipaste", () => {
     applySettings(settings);
   }
 
+  async function setAppShortcutEnabled(enabled: boolean) {
+    if (!isTauri) return;
+    applySettings(await ipasteApi.setAppShortcutEnabled(enabled));
+  }
+
   async function updatePanelOpenBehavior(behavior: PanelOpenBehavior) {
     const settings = await ipasteApi.updatePanelOpenBehavior(behavior);
     applySettings(settings);
@@ -904,6 +909,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
     updateAppendCopyTimeout,
     updateShortcut,
     updateAppCenterShortcut,
+    setAppShortcutEnabled,
     updatePanelOpenBehavior,
     updatePanelLayout,
     updateOcrMode,

@@ -1,7 +1,9 @@
 import { ocrMessages } from "../../locales/ocr";
+import { lanShareMessages } from "../../locales/lanShare";
 import type { I18nKey } from "./en";
 
 export const ja = {
+  ...lanShareMessages.ja,
   "language.english": "英語",
   "language.chineseSimplified": "簡体字中国語",
   "language.japanese": "日本語",
@@ -156,6 +158,9 @@ export const ja = {
   "settings.shortcuts.global.title": "グローバルオープンショートカット",
   "settings.shortcuts.global.description": "他のアプリからiPasteパネルを開きます。",
   "settings.shortcuts.recording": "新しいショートカットを押してください",
+  "settings.shortcuts.unset": "ショートカット未設定",
+  "settings.shortcuts.conflict": "{shortcut} はすでに使用されています。別のキーの組み合わせをお試しください。",
+  "settings.shortcuts.updateFailed": "ショートカットを更新できませんでした。もう一度お試しください。",
   "settings.shortcuts.restoreDefault": "既定に戻す",
   "settings.shortcuts.panel.title": "パネルショートカット",
   "settings.shortcuts.panel.description": "数値ショートカットは、現在のカテゴリ順に従います。歴史は常に第一です。",

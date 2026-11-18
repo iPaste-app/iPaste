@@ -42,6 +42,7 @@ import { languageOptions, t } from "../i18n";
 import { ipasteApi } from "../lib/ipasteApi";
 import { formatShortcut } from "../lib/format";
 import { shortcutsEqual } from "../lib/shortcuts";
+import { getShortcutErrorMessage } from "../lib/shortcutError";
 import {
   IPASTE_GITHUB_REPOSITORY_URL,
   openGitHubRepository,
@@ -60,8 +61,8 @@ const hasOpenedOcr = ref(false);
 const ocrNavigationRevision = ref(0);
 const settingsLoadError = ref<string | null>(null);
 const showPermissionGuide = ref(false);
-const shortcutDraft = ref(DEFAULT_SHORTCUT);
-const appCenterShortcutDraft = ref(DEFAULT_APP_CENTER_SHORTCUT);
+const shortcutDraft = ref("");
+const appCenterShortcutDraft = ref("");
 const shortcutRecordingTarget = ref<ShortcutTarget | null>(null);
 const shortcutFeedbackTarget = ref<ShortcutTarget | null>(null);
 const shortcutMessage = ref<string | null>(null);
@@ -76,7 +77,10 @@ const isSavingCloud = ref(false);
 const appInfo = ref<AppInfo | null>(null);
 const isTauri = "__TAURI_INTERNALS__" in window;
 const isMacOs = /mac/i.test(navigator.platform) || /Mac OS/i.test(navigator.userAgent);
-if (!isMacOs && new URLSearchParams(window.location.search).get("tab") === "ocr") {
+const initialTab = new URLSearchParams(window.location.search).get("tab");
+if (initialTab === "shortcuts") {
+  activeTab.value = "shortcuts";
+} else if (!isMacOs && initialTab === "ocr") {
   activeTab.value = "ocr";
   hasOpenedOcr.value = true;
 }
@@ -85,9 +89,14 @@ const isLoadingAutostart = ref(true);
 const isUpdatingAutostart = ref(false);
 const autostartError = ref<string | null>(null);
 let shouldRestoreAppShortcutAfterRecording = false;
+let shortcutRestorePromise: Promise<boolean> | null = null;
 const updater = useUpdater();
 
-useSettingsNavigation(() => {
+useSettingsNavigation((target) => {
+  if (target === "shortcuts") {
+    activeTab.value = "shortcuts";
+    return;
+  }
   if (isMacOs) return;
   activeTab.value = "ocr";
   hasOpenedOcr.value = true;
@@ -160,10 +169,20 @@ const appendCopyTimeoutText = computed(() => {
 const cloudStatusText = computed(() => {
   return store.cloud.enabled ? t("settings.cloud.enabled") : t("settings.cloud.disabled");
 });
-const formattedShortcutDraft = computed(() => formatShortcut(shortcutDraft.value || store.shortcut));
-const formattedAppCenterShortcutDraft = computed(() =>
-  formatShortcut(appCenterShortcutDraft.value || store.appCenterShortcut),
+const formattedShortcutDraft = computed(() =>
+  shortcutDraft.value ? formatShortcut(shortcutDraft.value) : t("settings.shortcuts.unset"),
 );
+const formattedAppCenterShortcutDraft = computed(() =>
+  appCenterShortcutDraft.value ? formatShortcut(appCenterShortcutDraft.value) : t("settings.shortcuts.unset"),
+);
+
+// Recovery may clear a saved binding while the user has already recorded its replacement.
+watch(() => store.shortcut, (shortcut, previous) => {
+  if (shortcutDraft.value === previous) shortcutDraft.value = shortcut;
+});
+watch(() => store.appCenterShortcut, (shortcut, previous) => {
+  if (appCenterShortcutDraft.value === previous) appCenterShortcutDraft.value = shortcut;
+});
 const canSaveShortcut = computed(() =>
   Boolean(
     shortcutDraft.value
@@ -262,15 +281,16 @@ async function toggleAutostart() {
 }
 
 function resetShortcutForm() {
-  shortcutDraft.value = store.shortcut || DEFAULT_SHORTCUT;
-  appCenterShortcutDraft.value = store.appCenterShortcut || DEFAULT_APP_CENTER_SHORTCUT;
+  shortcutDraft.value = store.shortcut;
+  appCenterShortcutDraft.value = store.appCenterShortcut;
   shortcutFeedbackTarget.value = null;
   shortcutMessage.value = null;
   shortcutError.value = null;
 }
 
 async function startRecordingShortcut(target: ShortcutTarget) {
-  if (shortcutRecordingTarget.value) return;
+  if (shortcutRecordingTarget.value || savingShortcutTarget.value) return;
+  if (shortcutRestorePromise && !(await shortcutRestorePromise)) return;
   shortcutFeedbackTarget.value = target;
   if (!(await pauseAppShortcutWhileRecording())) return;
   shortcutRecordingTarget.value = target;
@@ -285,8 +305,9 @@ async function stopRecordingShortcut(options: { restoreAppShortcut?: boolean } =
     window.removeEventListener("keydown", handleShortcutRecording, { capture: true });
   }
   if (options.restoreAppShortcut) {
-    await restoreAppShortcutAfterRecording();
+    return restoreAppShortcutAfterRecording();
   }
+  return true;
 }
 
 function handleShortcutRecording(event: KeyboardEvent) {
@@ -323,25 +344,29 @@ async function pauseAppShortcutWhileRecording() {
   if (shouldRestoreAppShortcutAfterRecording) return true;
 
   try {
-    await ipasteApi.setAppShortcutEnabled(false);
+    await store.setAppShortcutEnabled(false);
     shouldRestoreAppShortcutAfterRecording = true;
     return true;
   } catch (unknownError) {
-    shortcutError.value = String(unknownError);
+    reportShortcutError(unknownError);
     return false;
   }
 }
 
-async function restoreAppShortcutAfterRecording() {
-  if (!shouldRestoreAppShortcutAfterRecording) return;
-  shouldRestoreAppShortcutAfterRecording = false;
-
-  try {
-    await ipasteApi.setAppShortcutEnabled(true);
-  } catch (unknownError) {
-    shouldRestoreAppShortcutAfterRecording = true;
-    shortcutError.value = String(unknownError);
-  }
+function restoreAppShortcutAfterRecording(): Promise<boolean> {
+  if (shortcutRestorePromise) return shortcutRestorePromise;
+  if (!shouldRestoreAppShortcutAfterRecording) return Promise.resolve(true);
+  shortcutRestorePromise = store.setAppShortcutEnabled(true)
+    .then(() => {
+      shouldRestoreAppShortcutAfterRecording = false;
+      return true;
+    })
+    .catch((unknownError) => {
+      reportShortcutError(unknownError);
+      return false;
+    })
+    .finally(() => { shortcutRestorePromise = null; });
+  return shortcutRestorePromise;
 }
 
 function shortcutFromKeyboardEvent(event: KeyboardEvent) {
@@ -356,6 +381,11 @@ function shortcutFromKeyboardEvent(event: KeyboardEvent) {
 
   if (!modifiers.length) return "";
   return [...modifiers, key].join("+");
+}
+
+function reportShortcutError(error: unknown, shortcut?: string) {
+  console.error("[iPaste] Shortcut update failed:", error);
+  shortcutError.value = getShortcutErrorMessage(error, shortcut);
 }
 
 function shortcutKeyFromEvent(event: KeyboardEvent) {
@@ -387,19 +417,19 @@ function shortcutKeyFromEvent(event: KeyboardEvent) {
 }
 
 async function saveShortcut(target: ShortcutTarget) {
-  await stopRecordingShortcut({ restoreAppShortcut: true });
-  shortcutFeedbackTarget.value = target;
-  shortcutMessage.value = null;
-  shortcutError.value = null;
-  const shortcut = target === "panel" ? shortcutDraft.value : appCenterShortcutDraft.value;
-  const otherShortcut = target === "panel" ? store.appCenterShortcut : store.shortcut;
-  if (shortcutsEqual(shortcut, otherShortcut, isMacOs)) {
-    shortcutError.value = t("settings.shortcuts.duplicate");
-    return;
-  }
-
+  if (savingShortcutTarget.value) return;
   savingShortcutTarget.value = target;
+  shortcutFeedbackTarget.value = target;
   try {
+    if (!(await stopRecordingShortcut({ restoreAppShortcut: true }))) return;
+    shortcutMessage.value = null;
+    shortcutError.value = null;
+    const shortcut = target === "panel" ? shortcutDraft.value : appCenterShortcutDraft.value;
+    const otherShortcut = target === "panel" ? store.appCenterShortcut : store.shortcut;
+    if (shortcutsEqual(shortcut, otherShortcut, isMacOs)) {
+      shortcutError.value = t("settings.shortcuts.duplicate");
+      return;
+    }
     if (target === "panel") {
       await store.updateShortcut(shortcut);
       shortcutDraft.value = store.shortcut;
@@ -409,7 +439,7 @@ async function saveShortcut(target: ShortcutTarget) {
     }
     shortcutMessage.value = t("settings.shortcuts.saved");
   } catch (unknownError) {
-    shortcutError.value = String(unknownError);
+    reportShortcutError(unknownError, target === "panel" ? shortcutDraft.value : appCenterShortcutDraft.value);
   } finally {
     savingShortcutTarget.value = null;
   }

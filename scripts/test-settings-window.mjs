@@ -21,7 +21,7 @@ const stubs = {
   store: "export const useIpasteStore = () => globalThis.__settingsTest.store;",
   api: "export const ipasteApi = new Proxy({}, {get: (_, key) => (...args) => globalThis.__settingsTest.api[key](...args)});",
   autostart: "export const isEnabled = () => globalThis.__settingsTest.readAutostart(); export const enable = () => {globalThis.__settingsTest.writes++}; export const disable = enable;",
-  i18n: "export const t = key => key; export const languageOptions = [];",
+  i18n: "import {zhCN} from './src/i18n/locales/zh-CN'; export const t = (key, params = {}) => key === 'settings.shortcuts.conflict' ? zhCN[key].replace('{shortcut}', params.shortcut) : key; export const languageOptions = []; export const currentLocale = {value: 'zh-CN'};",
   format: "export const formatShortcut = key => key;",
   star: "export const IPASTE_GITHUB_REPOSITORY_URL = 'https://github.com/iPaste-app/iPaste'; export const openGitHubRepository = async () => {};",
   updater: "import {ref} from 'vue'; export const useUpdater = () => new Proxy({}, {get: (_, key) => key.startsWith('open') || key.startsWith('dismiss') ? () => {} : ref(null)});",

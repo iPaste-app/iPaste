@@ -1,7 +1,9 @@
 import { ocrMessages } from "../../locales/ocr";
+import { lanShareMessages } from "../../locales/lanShare";
 import type { I18nKey } from "./en";
 
 export const fr = {
+  ...lanShareMessages.fr,
   "language.english": "Anglais",
   "language.chineseSimplified": "Chinois simplifié",
   "language.japanese": "Japonais",
@@ -156,6 +158,9 @@ export const fr = {
   "settings.shortcuts.global.title": "Raccourci global d'ouverture",
   "settings.shortcuts.global.description": "Ouvrez le panneau iPaste depuis d'autres apps.",
   "settings.shortcuts.recording": "Appuyez sur un nouveau raccourci",
+  "settings.shortcuts.unset": "Aucun raccourci défini",
+  "settings.shortcuts.conflict": "{shortcut} est déjà utilisé. Essayez une autre combinaison.",
+  "settings.shortcuts.updateFailed": "Impossible de mettre à jour le raccourci. Veuillez réessayer.",
   "settings.shortcuts.restoreDefault": "Restaurer par défaut",
   "settings.shortcuts.panel.title": "Raccourcis du panneau",
   "settings.shortcuts.panel.description": "Les raccourcis numériques suivent l'ordre actuel des catégories. L'historique est toujours en premier.",

@@ -24,6 +24,8 @@ mod file_clipboard_tests;
 mod ocr_asset_cache;
 mod ocr_error;
 mod pinning;
+mod app_shortcuts;
+mod lan_share;
 #[cfg(test)]
 mod pinning_tests;
 #[cfg(test)]
@@ -84,7 +86,7 @@ use tauri::{
     Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_autostart::MacosLauncher;
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
 use uuid::Uuid;
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
@@ -787,6 +789,7 @@ struct MainPanelState {
 
 struct AppState {
     store: Store,
+    lan_share: lan_share::ShareManager,
     settings_target: Mutex<Option<String>>,
     #[cfg(target_os = "windows")]
     ocr_service: Arc<windows_ocr::OcrService>,
@@ -809,6 +812,7 @@ struct AppState {
     active_shortcut: Arc<Mutex<String>>,
     active_app_center_shortcut: Arc<Mutex<String>>,
     is_app_shortcut_enabled: Arc<Mutex<bool>>,
+    shortcut_operation: Mutex<()>,
     #[cfg(target_os = "macos")]
     main_panel_state: Arc<Mutex<Option<MainPanelState>>>,
 }
@@ -1211,27 +1215,28 @@ impl Store {
     }
 
     fn update_shortcut(&self, shortcut: String) -> Result<AppSettings, String> {
-        let shortcut = clean_shortcut(shortcut)?;
-        let conn = self.connect()?;
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES ('shortcut', ?1)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![shortcut],
-        )
-        .map_err(|error| error.to_string())?;
-        self.settings_with_conn(&conn)
+        self.update_shortcut_settings(&[("shortcut", &shortcut)])
     }
 
     fn update_app_center_shortcut(&self, shortcut: String) -> Result<AppSettings, String> {
-        let shortcut = clean_shortcut(shortcut)?;
-        let conn = self.connect()?;
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES ('app_center_shortcut', ?1)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![shortcut],
-        )
-        .map_err(|error| error.to_string())?;
-        self.settings_with_conn(&conn)
+        self.update_shortcut_settings(&[("app_center_shortcut", &shortcut)])
+    }
+
+    fn update_shortcut_settings(&self, shortcuts: &[(&str, &str)]) -> Result<AppSettings, String> {
+        let mut conn = self.connect()?;
+        let transaction = conn.transaction().map_err(|error| error.to_string())?;
+        for (key, shortcut) in shortcuts {
+            let shortcut = clean_shortcut(shortcut.to_string())?;
+            transaction.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![key, shortcut],
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        let settings = self.settings_with_conn(&transaction)?;
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok(settings)
     }
 
     fn update_settings(&self, retention_days: i64) -> Result<AppSettings, String> {
@@ -3027,38 +3032,30 @@ fn update_append_copy_timeout(
 }
 
 #[tauri::command]
-fn update_shortcut(
+async fn update_shortcut(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     shortcut: String,
 ) -> Result<AppSettings, String> {
-    let shortcut = clean_shortcut(shortcut)?;
-    update_registered_app_shortcut(&app, &state, &shortcut)?;
-    let settings = state.store.update_shortcut(shortcut)?;
-    emit_settings_changed(&app, &settings);
-    Ok(settings)
+    app_shortcuts::update(&app, &state, app_shortcuts::ShortcutTarget::Panel, shortcut)
 }
 
 #[tauri::command]
-fn update_app_center_shortcut(
+async fn update_app_center_shortcut(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     shortcut: String,
 ) -> Result<AppSettings, String> {
-    let shortcut = clean_shortcut(shortcut)?;
-    update_registered_app_center_shortcut(&app, &state, &shortcut)?;
-    let settings = state.store.update_app_center_shortcut(shortcut)?;
-    emit_settings_changed(&app, &settings);
-    Ok(settings)
+    app_shortcuts::update(&app, &state, app_shortcuts::ShortcutTarget::AppCenter, shortcut)
 }
 
 #[tauri::command]
-fn set_app_shortcut_enabled(
+async fn set_app_shortcut_enabled(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     enabled: bool,
-) -> Result<bool, String> {
-    set_app_shortcut_enabled_inner(&app, &state, enabled)
+) -> Result<AppSettings, String> {
+    app_shortcuts::set_enabled(&app, &state, enabled)
 }
 
 #[tauri::command]
@@ -3380,7 +3377,7 @@ fn show_panel(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 async fn show_settings(app: tauri::AppHandle, tab: Option<String>) -> Result<(), String> {
-    if tab.as_deref().is_some_and(|tab| tab != "ocr") {
+    if tab.as_deref().is_some_and(|tab| !matches!(tab, "ocr" | "shortcuts")) {
         return Err("不支持的设置页面".to_string());
     }
     show_settings_window(&app, tab.as_deref())
@@ -3693,6 +3690,9 @@ pub fn run() {
             set_clip_pinned,
             copy_clip,
             copy_text_ephemeral,
+            lan_share::start_lan_share,
+            lan_share::get_lan_share,
+            lan_share::stop_lan_share,
             file_reference_size,
             file_reference_preview,
             image_thumbnail,
@@ -3746,7 +3746,7 @@ pub fn run() {
                 "show",
                 localized_text(&settings.language, "open_ipaste"),
                 true,
-                Some(settings.shortcut.as_str()),
+                (!settings.shortcut.is_empty()).then_some(settings.shortcut.as_str()),
             )?;
             let append_copy_menu_item = MenuItem::with_id(
                 app,
@@ -3778,6 +3778,7 @@ pub fn run() {
             )?;
             let state = AppState {
                 store: store.clone(),
+                lan_share: lan_share::ShareManager::default(),
                 settings_target: Mutex::new(None),
                 #[cfg(target_os = "windows")]
                 ocr_asset_lock: Arc::new(Mutex::new(())),
@@ -3807,6 +3808,7 @@ pub fn run() {
                     settings.app_center_shortcut.clone(),
                 )),
                 is_app_shortcut_enabled: Arc::new(Mutex::new(true)),
+                shortcut_operation: Mutex::new(()),
                 #[cfg(target_os = "macos")]
                 main_panel_state: Arc::new(Mutex::new(None)),
             };
@@ -3831,9 +3833,11 @@ pub fn run() {
                 quit_menu_item,
                 settings.language.as_str(),
             )?;
-            register_app_shortcut(app.handle(), &settings.shortcut)?;
-            register_app_shortcut(app.handle(), &settings.app_center_shortcut)?;
-            show_main_window(app.handle(), MainWindowActivation::Activate)?;
+            if app_shortcuts::initialize(app.handle()) {
+                app_shortcuts::open_shortcut_settings(app.handle());
+            } else {
+                show_main_window(app.handle(), MainWindowActivation::Activate)?;
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -3915,8 +3919,15 @@ pub fn run() {
             "quit" => app.exit(0),
             _ => {}
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                if let Some(state) = app.try_state::<AppState>() {
+                    tauri::async_runtime::block_on(state.lan_share.stop(None));
+                }
+            }
+        });
 }
 
 fn update_pause_capture_menu_label(state: &AppState, is_listening: bool) {
@@ -4619,178 +4630,16 @@ fn shortcut_matches(shortcut: &Shortcut, shortcut_spec: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn register_app_shortcut(app: &tauri::AppHandle, shortcut: &str) -> Result<(), String> {
-    if app.global_shortcut().is_registered(shortcut) {
-        return Ok(());
-    }
-
-    app.global_shortcut()
-        .register(shortcut)
-        .map_err(|error| shortcut_registration_error(shortcut, error))
-}
-
-fn unregister_app_shortcut(app: &tauri::AppHandle, shortcut: &str) -> Result<(), String> {
-    if !app.global_shortcut().is_registered(shortcut) {
-        return Ok(());
-    }
-
-    app.global_shortcut()
-        .unregister(shortcut)
-        .map_err(|error| error.to_string())
-}
-
-fn set_app_shortcut_enabled_inner(
-    app: &tauri::AppHandle,
-    state: &AppState,
-    enabled: bool,
-) -> Result<bool, String> {
-    let shortcut = state
-        .active_shortcut
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
-    let app_center_shortcut = state
-        .active_app_center_shortcut
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
-
-    if enabled {
-        let panel_was_registered = app.global_shortcut().is_registered(shortcut.as_str());
-        register_app_shortcut(app, &shortcut)?;
-        if let Err(error) = register_app_shortcut(app, &app_center_shortcut) {
-            if !panel_was_registered {
-                let _ = unregister_app_shortcut(app, &shortcut);
-            }
-            return Err(error);
-        }
-    } else {
-        unregister_app_shortcut(app, &shortcut)?;
-        if let Err(error) = unregister_app_shortcut(app, &app_center_shortcut) {
-            let _ = register_app_shortcut(app, &shortcut);
-            return Err(error);
-        }
-    }
-
-    *state
-        .is_app_shortcut_enabled
-        .lock()
-        .map_err(|error| error.to_string())? = enabled;
-    Ok(enabled)
-}
-
-fn update_registered_app_shortcut(
-    app: &tauri::AppHandle,
-    state: &AppState,
-    shortcut: &str,
-) -> Result<(), String> {
-    let app_center_shortcut = state
-        .active_app_center_shortcut
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
-    ensure_shortcuts_differ(shortcut, &app_center_shortcut)?;
-
-    let mut active_shortcut = state
-        .active_shortcut
-        .lock()
-        .map_err(|error| error.to_string())?;
-    let previous = active_shortcut.clone();
-
-    if previous == shortcut {
-        if is_app_shortcut_enabled(state)? && !app.global_shortcut().is_registered(shortcut) {
-            register_app_shortcut(app, shortcut)?;
-        }
-        state
-            .show_menu_item
-            .set_accelerator(Some(shortcut))
-            .map_err(|error| error.to_string())?;
-        return Ok(());
-    }
-
-    let was_enabled = is_app_shortcut_enabled(state)?;
-    unregister_app_shortcut(app, previous.as_str())?;
-
-    if was_enabled {
-        if let Err(error) = register_app_shortcut(app, shortcut) {
-            let _ = register_app_shortcut(app, &previous);
-            return Err(error);
-        }
-    }
-
-    if let Err(error) = state.show_menu_item.set_accelerator(Some(shortcut)) {
-        let _ = app.global_shortcut().unregister(shortcut);
-        if was_enabled {
-            let _ = register_app_shortcut(app, &previous);
-        }
-        return Err(error.to_string());
-    }
-
-    *active_shortcut = shortcut.to_string();
-    Ok(())
-}
-
-fn update_registered_app_center_shortcut(
-    app: &tauri::AppHandle,
-    state: &AppState,
-    shortcut: &str,
-) -> Result<(), String> {
-    let panel_shortcut = state
-        .active_shortcut
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
-    ensure_shortcuts_differ(&panel_shortcut, shortcut)?;
-
-    let mut active_shortcut = state
-        .active_app_center_shortcut
-        .lock()
-        .map_err(|error| error.to_string())?;
-    let previous = active_shortcut.clone();
-
-    if previous == shortcut {
-        if is_app_shortcut_enabled(state)? && !app.global_shortcut().is_registered(shortcut) {
-            register_app_shortcut(app, shortcut)?;
-        }
-        return Ok(());
-    }
-
-    let was_enabled = is_app_shortcut_enabled(state)?;
-    unregister_app_shortcut(app, previous.as_str())?;
-
-    if was_enabled {
-        if let Err(error) = register_app_shortcut(app, shortcut) {
-            let _ = register_app_shortcut(app, &previous);
-            return Err(error);
-        }
-    }
-
-    *active_shortcut = shortcut.to_string();
-    Ok(())
-}
-
 fn ensure_shortcuts_differ(panel_shortcut: &str, app_center_shortcut: &str) -> Result<(), String> {
+    if panel_shortcut.is_empty() || app_center_shortcut.is_empty() {
+        return Ok(());
+    }
     let panel = panel_shortcut.parse::<Shortcut>().map_err(|error| error.to_string())?;
     let app_center = app_center_shortcut.parse::<Shortcut>().map_err(|error| error.to_string())?;
     if panel.id() == app_center.id() {
         return Err("主面板快捷键与应用中心快捷键不能相同。".to_string());
     }
     Ok(())
-}
-
-fn is_app_shortcut_enabled(state: &AppState) -> Result<bool, String> {
-    state
-        .is_app_shortcut_enabled
-        .lock()
-        .map(|value| *value)
-        .map_err(|error| error.to_string())
-}
-
-fn shortcut_registration_error(shortcut: &str, error: impl ToString) -> String {
-    format!(
-        "无法注册快捷键 {shortcut}：{}。请换一个未被系统或其他应用占用的组合。",
-        error.to_string()
-    )
 }
 
 fn emit_settings_changed(app: &tauri::AppHandle, settings: &AppSettings) {
@@ -5090,6 +4939,7 @@ fn show_settings_window(app: &tauri::AppHandle, tab: Option<&str>) -> Result<(),
             SETTINGS_WINDOW,
             WebviewUrl::App(match tab {
                 Some("ocr") => "index.html?window=settings&tab=ocr".into(),
+                Some("shortcuts") => "index.html?window=settings&tab=shortcuts".into(),
                 _ => "index.html?window=settings".into(),
             }),
         )
@@ -6148,7 +5998,7 @@ fn clean_ephemeral_text(text: String) -> Result<String, String> {
 fn clean_shortcut(shortcut: String) -> Result<String, String> {
     let shortcut = shortcut.split_whitespace().collect::<String>();
     if shortcut.is_empty() {
-        return Err("请输入快捷键".to_string());
+        return Ok(shortcut);
     }
 
     let parsed = shortcut

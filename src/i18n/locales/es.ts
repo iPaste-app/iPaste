@@ -1,7 +1,9 @@
 import { ocrMessages } from "../../locales/ocr";
+import { lanShareMessages } from "../../locales/lanShare";
 import type { I18nKey } from "./en";
 
 export const es = {
+  ...lanShareMessages.es,
   "language.english": "Inglés",
   "language.chineseSimplified": "Chino simplificado",
   "language.japanese": "Japonés",
@@ -156,6 +158,9 @@ export const es = {
   "settings.shortcuts.global.title": "Atajo global para abrir",
   "settings.shortcuts.global.description": "Abre el panel de iPaste desde otras apps.",
   "settings.shortcuts.recording": "Pulsa un nuevo atajo",
+  "settings.shortcuts.unset": "Sin atajo configurado",
+  "settings.shortcuts.conflict": "{shortcut} ya está en uso. Prueba otra combinación.",
+  "settings.shortcuts.updateFailed": "No se pudo actualizar el atajo. Inténtalo de nuevo.",
   "settings.shortcuts.restoreDefault": "Restaurar predeterminado",
   "settings.shortcuts.panel.title": "Atajos del panel",
   "settings.shortcuts.panel.description": "Los atajos numéricos siguen el orden actual de categorías. El historial siempre va primero.",
