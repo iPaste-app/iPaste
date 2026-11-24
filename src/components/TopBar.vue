@@ -2,14 +2,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ClipboardPlus, Download, Grid2X2, Search, Settings, X } from "lucide-vue-next";
+import { useTemplateRef } from "vue";
 import { t } from "../i18n";
 import DownloadProgressBorder from "./DownloadProgressBorder.vue";
 
 const logoUrl = new URL("../../src-tauri/icons/tray-icon@2x.png", import.meta.url).href;
 
-const props = defineProps<{
-  modelValue: string;
-  shortcut: string;
+defineProps<{
+  searchOpen: boolean;
   settingsOpen: boolean;
   appCenterOpen: boolean;
   appendCopyEnabled: boolean;
@@ -22,7 +22,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  "update:modelValue": [value: string];
+  toggleSearch: [];
   toggleSettings: [];
   toggleAppCenter: [];
   toggleAppendCopy: [];
@@ -31,19 +31,13 @@ const emit = defineEmits<{
 }>();
 
 const isTauri = "__TAURI_INTERNALS__" in window;
+const searchTrigger = useTemplateRef<HTMLButtonElement>("searchTrigger");
 let dragReleaseTimer: number | null = null;
-let isComposing = false;
 
-function updateSearch(event: Event) {
-  if (isComposing || (event as InputEvent).isComposing) return;
-  const value = (event.target as HTMLInputElement).value;
-  if (value !== props.modelValue) emit("update:modelValue", value);
-}
-
-function finishComposition(event: CompositionEvent) {
-  isComposing = false;
-  updateSearch(event);
-}
+defineExpose({
+  focusSearchTrigger: () => searchTrigger.value?.focus({ preventScroll: true }),
+  isSearchTrigger: (target: EventTarget | null) => target instanceof Node && !!searchTrigger.value?.contains(target),
+});
 
 async function startWindowDrag(event: MouseEvent) {
   if (!isTauri || event.button !== 0) return;
@@ -84,88 +78,83 @@ function startMainWindowDrag() {
       <span class="top-bar-brand">iPaste</span>
     </div>
 
+    <button
+      ref="searchTrigger"
+      type="button"
+      class="top-bar-search-trigger"
+      aria-haspopup="dialog"
+      :aria-expanded="searchOpen"
+      :aria-controls="searchOpen ? 'quick-search-panel' : undefined"
+      :aria-label="t('shortcut.search')"
+      aria-keyshortcuts="Control+F Meta+F"
+      @click.stop="emit('toggleSearch')"
+    >
+      <Search class="size-4 shrink-0" aria-hidden="true" />
+      <span class="truncate">{{ t('shortcut.search') }}</span>
+    </button>
+
     <div class="top-bar-spacer" aria-hidden="true" @mousedown="startWindowDrag" />
 
-    <label
-      class="search-box"
-    >
-      <Search class="size-4 shrink-0 text-slate-400" />
-      <input
-        class="min-w-0 flex-1 bg-transparent text-sm text-slate-950 outline-none placeholder:text-slate-400"
-        :value="modelValue"
+    <div class="top-bar-actions">
+      <button
+        v-if="hasUpdate"
+        type="button"
+        class="icon-button update-icon-button"
+        :class="{ 'update-icon-button-checking': checkingUpdate, 'update-icon-button-downloading': downloadingUpdate }"
         tabindex="-1"
-        :placeholder="appCenterOpen ? t('shortcut.search') : t('topBar.searchPlaceholder')"
-        :aria-label="appCenterOpen ? t('shortcut.search') : t('topBar.searchPlaceholder')"
-        spellcheck="false"
-        @compositionstart="isComposing = true"
-        @compositionend="finishComposition"
-        @input="updateSearch"
-      />
-    </label>
+        :aria-label="updateLabel ?? t('topBar.openUpdate')"
+        :data-tooltip="updateLabel ?? t('topBar.openUpdate')"
+        @click.stop="emit('openUpdate')"
+      >
+        <Download class="size-4" />
+        <DownloadProgressBorder
+          v-if="downloadingUpdate"
+          :progress="updateProgress ?? null"
+          :label="updateLabel ?? t('update.button.downloading')"
+        />
+      </button>
 
-    <div class="hidden items-center gap-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-500 md:flex">
-      <Search class="size-3.5" />
-      <span>{{ shortcut }}</span>
+      <button
+        type="button"
+        class="icon-button app-center-button"
+        :class="{ 'app-center-button-active': appCenterOpen }"
+        tabindex="-1"
+        :aria-pressed="appCenterOpen"
+        :aria-label="t('appCenter.toggle')"
+        :data-tooltip="t('appCenter.toggle')"
+        @click.stop="emit('toggleAppCenter')"
+      >
+        <Grid2X2 class="size-4" />
+      </button>
+
+      <button
+        type="button"
+        class="icon-button append-copy-button"
+        :class="{ 'append-copy-button-active': appendCopyEnabled }"
+        tabindex="-1"
+        :aria-pressed="appendCopyEnabled"
+        :aria-label="appendCopyEnabled ? t('appendCopy.disable') : t('appendCopy.enable')"
+        :data-tooltip="appendCopyEnabled ? t('appendCopy.disable') : t('appendCopy.enableTooltip', { minutes: appendCopyTimeoutMinutes })"
+        @click.stop="emit('toggleAppendCopy')"
+      >
+        <ClipboardPlus class="size-4" />
+      </button>
+
+      <button
+        type="button"
+        class="icon-button"
+        :class="{ 'bg-slate-100 text-slate-950': settingsOpen }"
+        tabindex="-1"
+        :aria-label="t('topBar.openSettings')"
+        :data-tooltip="t('topBar.openSettings')"
+        @click.stop="emit('toggleSettings')"
+      >
+        <Settings class="size-4" />
+      </button>
+
+      <button type="button" class="icon-button" tabindex="-1" :aria-label="t('topBar.closePanel')" :data-tooltip="t('topBar.closePanel')" @click="emit('close')">
+        <X class="size-4" />
+      </button>
     </div>
-
-    <button
-      v-if="hasUpdate"
-      type="button"
-      class="icon-button update-icon-button"
-      :class="{ 'update-icon-button-checking': checkingUpdate, 'update-icon-button-downloading': downloadingUpdate }"
-      tabindex="-1"
-      :aria-label="updateLabel ?? t('topBar.openUpdate')"
-      :data-tooltip="updateLabel ?? t('topBar.openUpdate')"
-      @click.stop="emit('openUpdate')"
-    >
-      <Download class="size-4" />
-      <DownloadProgressBorder
-        v-if="downloadingUpdate"
-        :progress="updateProgress ?? null"
-        :label="updateLabel ?? t('update.button.downloading')"
-      />
-    </button>
-
-    <button
-      type="button"
-      class="icon-button app-center-button"
-      :class="{ 'app-center-button-active': appCenterOpen }"
-      tabindex="-1"
-      :aria-pressed="appCenterOpen"
-      :aria-label="t('appCenter.toggle')"
-      :data-tooltip="t('appCenter.toggle')"
-      @click.stop="emit('toggleAppCenter')"
-    >
-      <Grid2X2 class="size-4" />
-    </button>
-
-    <button
-      type="button"
-      class="icon-button append-copy-button"
-      :class="{ 'append-copy-button-active': appendCopyEnabled }"
-      tabindex="-1"
-      :aria-pressed="appendCopyEnabled"
-      :aria-label="appendCopyEnabled ? t('appendCopy.disable') : t('appendCopy.enable')"
-      :data-tooltip="appendCopyEnabled ? t('appendCopy.disable') : t('appendCopy.enableTooltip', { minutes: appendCopyTimeoutMinutes })"
-      @click.stop="emit('toggleAppendCopy')"
-    >
-      <ClipboardPlus class="size-4" />
-    </button>
-
-    <button
-      type="button"
-      class="icon-button"
-      :class="{ 'bg-slate-100 text-slate-950': settingsOpen }"
-      tabindex="-1"
-      :aria-label="t('topBar.openSettings')"
-      :data-tooltip="t('topBar.openSettings')"
-      @click.stop="emit('toggleSettings')"
-    >
-      <Settings class="size-4" />
-    </button>
-
-    <button type="button" class="icon-button" tabindex="-1" :aria-label="t('topBar.closePanel')" :data-tooltip="t('topBar.closePanel')" @click="emit('close')">
-      <X class="size-4" />
-    </button>
   </header>
 </template>

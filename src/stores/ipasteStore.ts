@@ -4,6 +4,7 @@ import { computed, ref } from "vue";
 import { cleanLanguage, setLanguage } from "../i18n";
 import { ipasteApi } from "../lib/ipasteApi";
 import { categoryOrderByIds, compareCategoryItemOrder, compareClipOrder } from "../lib/clipOrder";
+import { matchesClipQuery } from "../lib/clipSearch";
 import type {
   AppendCopyChangedEvent,
   CapturedEvent,
@@ -87,16 +88,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
   const visibleItems = computed<ClipViewItem[]>(() => {
     const query = search.value.trim().toLowerCase();
     const source = sourceItems.value;
-    if (!query) return source;
-
-    return source.filter((item) =>
-      [
-        item.displayName ?? "",
-        item.previewText,
-        item.clipType,
-        item.clipType === "image" ? "image" : item.text,
-      ].some((value) => value.toLowerCase().includes(query)),
-    );
+    return query ? source.filter((item) => matchesClipQuery(item, query)) : source;
   });
 
   const selectedItem = computed(() => visibleItems.value[selectedIndex.value]);
@@ -236,33 +228,41 @@ export const useIpasteStore = defineStore("ipaste", () => {
     }
   }
 
-  async function reloadClips(options: { preserveSelection?: boolean; minCount?: number } = {}) {
+  async function reloadClips(options: {
+    preserveSelection?: boolean;
+    minCount?: number;
+    revealId?: string;
+    signal?: AbortSignal;
+  } = {}) {
     const requestId = ++clipRequestId;
     const query = search.value;
     const selection = options.preserveSelection && selectedCategoryId.value === "history"
       ? selectedItem.value : undefined;
     const minCount = Math.max(CLIP_PAGE_SIZE, options.minCount ?? CLIP_PAGE_SIZE);
+    const targetId = options.revealId ?? selection?.id;
     isReloadingClips = true;
     isLoadingMoreClips.value = false;
     historyNeedsReload = true;
-    const isCurrent = () => requestId === clipRequestId && query === search.value;
+    const isCurrent = () => requestId === clipRequestId && query === search.value
+      && !options.signal?.aborted && (!options.revealId || selectedCategoryId.value === "history");
 
     try {
-      // Read a contiguous prefix, including the selected item after an unpin.
+      // Keep offsets contiguous when revealing a search result or preserving an unpinned item.
       // Restart if a capture changes offsets while the pages are in flight.
       while (isCurrent()) {
         const revision = historyRevision;
-        let page = await ipasteApi.listClips(0, Math.min(100, minCount), query);
+        let page = await ipasteApi.listClips(0, options.revealId ? 100 : Math.min(100, minCount), query);
         if (!isCurrent()) return;
         const items = [...page.clips];
         while (revision === historyRevision && page.hasMore && page.clips.length > 0
           && ((options.minCount !== undefined && items.length < minCount)
-            || (selection && !items.some((item) => item.id === selection.id)))) {
+            || (targetId && !items.some((item) => item.id === targetId)))) {
           page = await ipasteApi.listClips(items.length, 100, query);
           if (!isCurrent()) return;
           items.push(...page.clips);
         }
         if (revision !== historyRevision) continue;
+        if (options.revealId && !items.some((item) => item.id === options.revealId)) return;
 
         const currentSelection = selectedItem.value;
         clips.value = items.sort(compareClipOrder);
@@ -276,12 +276,30 @@ export const useIpasteStore = defineStore("ipaste", () => {
         return;
       }
     } catch (unknownError) {
-      if (requestId === clipRequestId && query === search.value) {
+      if (isCurrent() && !options.revealId) {
         error.value = String(unknownError);
       }
     } finally {
       if (requestId === clipRequestId) isReloadingClips = false;
     }
+  }
+
+  async function revealClip(item: ClipViewItem, signal: AbortSignal) {
+    const categoryId = item.collection === "history" ? "history" : item.categoryId;
+    const isCurrent = () => !signal.aborted && selectedCategoryId.value === categoryId;
+    const findIndex = () => visibleItems.value.findIndex((entry) => entry.id === item.id);
+    if (!isCurrent()) return false;
+
+    let index = findIndex();
+    if (index < 0 && item.collection === "history") {
+      await reloadClips({ revealId: item.id, minCount: clips.value.length, preserveSelection: true, signal });
+      if (!isCurrent()) return false;
+      index = findIndex();
+    }
+    if (index < 0) return false;
+
+    setSelectedIndex(index);
+    return true;
   }
 
   async function createCategoryWithClip(name: string, clipId: string, options: { select?: boolean } = {}) {
@@ -746,7 +764,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
     const selection = selectedItem.value;
     const hadClip = clips.value.some((item) => item.id === clip.id);
     const hasSearch = Boolean(search.value.trim());
-    const matchesCurrentSearch = clipMatchesSearch(clip, search.value);
+    const matchesCurrentSearch = matchesClipQuery(clip, search.value.trim().toLowerCase());
 
     if (!hasSearch || matchesCurrentSearch) {
       const ordered = [...clips.value].sort(compareClipOrder);
@@ -762,7 +780,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
       clipTotalCount.value = totalCount;
       if (!hasSearch) {
         visibleHistoryTotalCount.value = totalCount;
-      } else if (wasInserted && clipMatchesSearch(clip, search.value)) {
+      } else if (wasInserted && matchesCurrentSearch) {
         visibleHistoryTotalCount.value += 1;
       }
     } else if (!hadClip && !hasMoreClips.value) {
@@ -782,7 +800,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
       const hasClip = clips.value.some((entry) => entry.id === clip.id);
       if (hasClip) {
         clips.value = clips.value.map((entry) => (entry.id === clip.id ? clip : entry)).sort(compareClipOrder);
-      } else if (clipMatchesSearch(clip, search.value)) {
+      } else if (matchesClipQuery(clip, search.value.trim().toLowerCase())) {
         clips.value = [clip, ...clips.value].sort(compareClipOrder);
       }
       restoreSelection(selection);
@@ -797,18 +815,6 @@ export const useIpasteStore = defineStore("ipaste", () => {
 
   function originalClipId(item: ClipViewItem) {
     return item.collection === "history" ? item.id : item.clipSnapshotId;
-  }
-
-  function clipMatchesSearch(clip: ClipItem, value: string) {
-    const query = value.trim().toLowerCase();
-    if (!query) return true;
-
-    return [
-      clip.displayName ?? "",
-      clip.previewText,
-      clip.clipType,
-      clip.clipType === "image" ? "image" : clip.text,
-    ].some((text) => text.toLowerCase().includes(query));
   }
 
   function orderCategoriesByIds(items: Category[], ids: string[]) {
@@ -883,6 +889,7 @@ export const useIpasteStore = defineStore("ipaste", () => {
     load,
     loadSettings,
     reloadClips,
+    revealClip,
     loadMoreClips,
     bindEvents,
     createCategory,

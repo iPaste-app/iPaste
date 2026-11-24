@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import appPackage from "../../package.json";
 import { localizeFileError } from "./fileError";
 import { categoryOrderByIds, compareCategoryItemOrder, compareClipOrder } from "./clipOrder";
+import { matchesClipQuery } from "./clipSearch";
 import type {
   AppInfo,
   AppSettings,
@@ -188,16 +189,7 @@ export const ipasteApi = {
   },
   listClips(offset = 0, limit = 20, search = "") {
     const query = search.trim().toLowerCase();
-    const source = query
-      ? mockClips.filter((item) =>
-          [
-            item.displayName ?? "",
-            item.previewText,
-            item.clipType,
-            item.clipType === "image" ? "image" : item.text,
-          ].some((value) => value.toLowerCase().includes(query)),
-        )
-      : mockClips;
+    const source = query ? mockClips.filter((item) => matchesClipQuery(item, query)) : mockClips;
     return call<ClipPage>("list_clips", { offset, limit, search }, {
       clips: [...source].sort(compareClipOrder).slice(offset, offset + limit),
       hasMore: offset + limit < source.length,

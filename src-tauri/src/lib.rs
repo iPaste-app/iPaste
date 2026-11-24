@@ -26,12 +26,14 @@ mod ocr_error;
 mod pinning;
 mod app_shortcuts;
 mod lan_share;
+mod app_locale;
 #[cfg(test)]
 mod pinning_tests;
 #[cfg(test)]
 mod window_size_tests;
 #[cfg(test)]
 mod mfa_tests;
+use app_locale::{clean_language, localized_text, DEFAULT_LANGUAGE};
 use ocr_error::ImageOcrError;
 
 #[cfg(target_os = "macos")]
@@ -118,10 +120,6 @@ const CLIP_VIEWER_WINDOW_PREFIX: &str = "clip-viewer-";
 const DEFAULT_SHORTCUT: &str = "CommandOrControl+Shift+V";
 const DEFAULT_APP_CENTER_SHORTCUT: &str = "CommandOrControl+Shift+A";
 const FALLBACK_APP_CENTER_SHORTCUT: &str = "CommandOrControl+Alt+Shift+A";
-const PAUSE_CAPTURE_LABEL: &str = "暂停捕捉";
-const RESUME_CAPTURE_LABEL: &str = "恢复捕捉";
-const ENABLE_APPEND_COPY_LABEL: &str = "开启追加复制";
-const DISABLE_APPEND_COPY_LABEL: &str = "关闭追加复制";
 #[cfg(target_os = "windows")]
 const OCR_DIR: &str = "ocr";
 #[cfg(target_os = "windows")]
@@ -173,7 +171,6 @@ const DEFAULT_APPEND_COPY_TIMEOUT_MINUTES: i64 = 1;
 const APPEND_COPY_TIMEOUT_OPTIONS: [i64; 4] = [1, 3, 5, 10];
 const DEFAULT_PANEL_OPEN_BEHAVIOR: &str = "history";
 const DEFAULT_PANEL_LAYOUT: &str = "top";
-const DEFAULT_LANGUAGE: &str = "en";
 const STAR_PROMPT_SETTING_KEY: &str = "github_star_prompt_state_v1";
 const STAR_PROMPT_INITIAL_PASTE_COUNT: u64 = 5;
 const STAR_PROMPT_FIRST_SNOOZE_DAYS: i64 = 7;
@@ -6051,78 +6048,6 @@ fn clean_ocr_mode(mode: String) -> Result<String, String> {
         Ok(mode.to_string())
     } else {
         Err("请选择有效的图片 OCR 模式".to_string())
-    }
-}
-
-fn clean_language(language: String) -> Result<String, String> {
-    let language = language.trim();
-    if matches!(language, "en" | "zh-CN" | "ja" | "ko" | "es" | "fr" | "de") {
-        Ok(language.to_string())
-    } else {
-        Err("Please choose a valid language".to_string())
-    }
-}
-
-fn localized_text(language: &str, key: &str) -> &'static str {
-    match (language, key) {
-        ("zh-CN", "open_ipaste") => "打开 iPaste",
-        ("ja", "open_ipaste") => "iPaste を開く",
-        ("ko", "open_ipaste") => "iPaste 열기",
-        ("es", "open_ipaste") => "Abrir iPaste",
-        ("fr", "open_ipaste") => "Ouvrir iPaste",
-        ("de", "open_ipaste") => "iPaste öffnen",
-        (_, "open_ipaste") => "Open iPaste",
-        ("zh-CN", "settings") => "设置...",
-        ("ja", "settings") => "設定...",
-        ("ko", "settings") => "설정...",
-        ("es", "settings") => "Ajustes...",
-        ("fr", "settings") => "Réglages...",
-        ("de", "settings") => "Einstellungen...",
-        (_, "settings") => "Settings...",
-        ("zh-CN", "quit_ipaste") => "退出 iPaste",
-        ("ja", "quit_ipaste") => "iPaste を終了",
-        ("ko", "quit_ipaste") => "iPaste 종료",
-        ("es", "quit_ipaste") => "Salir de iPaste",
-        ("fr", "quit_ipaste") => "Quitter iPaste",
-        ("de", "quit_ipaste") => "iPaste beenden",
-        (_, "quit_ipaste") => "Quit iPaste",
-        (_, "tray_tooltip") => "iPaste",
-        ("zh-CN", "settings_title") => "iPaste 设置",
-        ("ja", "settings_title") => "iPaste 設定",
-        ("ko", "settings_title") => "iPaste 설정",
-        ("es", "settings_title") => "Ajustes de iPaste",
-        ("fr", "settings_title") => "Réglages iPaste",
-        ("de", "settings_title") => "iPaste Einstellungen",
-        (_, "settings_title") => "iPaste Settings",
-        ("zh-CN", "pause_capture") => PAUSE_CAPTURE_LABEL,
-        ("ja", "pause_capture") => "キャプチャを一時停止",
-        ("ko", "pause_capture") => "캡처 일시 중지",
-        ("es", "pause_capture") => "Pausar captura",
-        ("fr", "pause_capture") => "Suspendre la capture",
-        ("de", "pause_capture") => "Erfassung pausieren",
-        (_, "pause_capture") => "Pause capture",
-        ("zh-CN", "resume_capture") => RESUME_CAPTURE_LABEL,
-        ("ja", "resume_capture") => "キャプチャを再開",
-        ("ko", "resume_capture") => "캡처 다시 시작",
-        ("es", "resume_capture") => "Reanudar captura",
-        ("fr", "resume_capture") => "Reprendre la capture",
-        ("de", "resume_capture") => "Erfassung fortsetzen",
-        (_, "resume_capture") => "Resume capture",
-        ("zh-CN", "enable_append_copy") => ENABLE_APPEND_COPY_LABEL,
-        ("ja", "enable_append_copy") => "追記コピーを有効化",
-        ("ko", "enable_append_copy") => "이어붙여 복사 켜기",
-        ("es", "enable_append_copy") => "Activar copia acumulada",
-        ("fr", "enable_append_copy") => "Activer la copie ajoutée",
-        ("de", "enable_append_copy") => "Anhängekopie aktivieren",
-        (_, "enable_append_copy") => "Enable append copy",
-        ("zh-CN", "disable_append_copy") => DISABLE_APPEND_COPY_LABEL,
-        ("ja", "disable_append_copy") => "追記コピーを無効化",
-        ("ko", "disable_append_copy") => "이어붙여 복사 끄기",
-        ("es", "disable_append_copy") => "Desactivar copia acumulada",
-        ("fr", "disable_append_copy") => "Désactiver la copie ajoutée",
-        ("de", "disable_append_copy") => "Anhängekopie deaktivieren",
-        (_, "disable_append_copy") => "Disable append copy",
-        _ => "iPaste",
     }
 }
 

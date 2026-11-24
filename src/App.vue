@@ -8,6 +8,7 @@ import CategoryRail from "./components/CategoryRail.vue";
 import ClipCard from "./components/ClipCard.vue";
 import ContentPinIcon from "./components/ContentPinIcon.vue";
 import ClipViewerWindow from "./components/ClipViewerWindow.vue";
+import QuickSearchPanel from "./components/QuickSearchPanel.vue";
 import SettingsWindow from "./components/SettingsWindow.vue";
 import StarPrompt from "./components/StarPrompt.vue";
 import TopBar from "./components/TopBar.vue";
@@ -24,7 +25,7 @@ import {
 import { cleanLanguage, setLanguage, t } from "./i18n";
 import { clipImageSrc } from "./lib/clipMedia";
 import { clipFileName, fileIconSrc } from "./lib/clipFile";
-import { categoryDisplayName, clipMetricText, formatShortcut, formatTime, typeLabel } from "./lib/format";
+import { categoryDisplayName, clipMetricText, formatTime, typeLabel } from "./lib/format";
 import { ipasteApi } from "./lib/ipasteApi";
 import { clipColumnCount, selectionDelta, submenuPlacement } from "./lib/panelLayout";
 import { openGitHubRepository } from "./lib/starPrompt";
@@ -44,6 +45,9 @@ const isClipViewerWindow = windowSearchParams.get("window") === "clip-viewer";
 const isStarPromptPreview = import.meta.env.DEV && windowSearchParams.get("preview") === "star-prompt";
 const starPromptPreviewLanguage = windowSearchParams.get("preview-language");
 const isMacOs = /mac/i.test(navigator.platform) || /Mac OS/i.test(navigator.userAgent);
+const topBar = ref<InstanceType<typeof TopBar> | null>(null);
+const quickSearch = ref<InstanceType<typeof QuickSearchPanel> | null>(null);
+const isSearchOpen = ref(false);
 const isPreservingCurrentApp = ref(false);
 const showStarPrompt = ref(false);
 const isStarPromptBusy = ref(false);
@@ -68,14 +72,6 @@ const quickPreviewSelectedText = ref("");
 const isAppCenterOpen = ref(false);
 const appCenterElement = ref<InstanceType<typeof AppCenterView> | null>(null);
 const appCenterSearch = ref("");
-const panelSearch = computed({
-  get: () => isAppCenterOpen.value ? appCenterSearch.value : store.search,
-  set: (value: string) => {
-    if (isAppCenterOpen.value) appCenterSearch.value = value;
-    else store.search = value;
-  },
-});
-watch(isAppCenterOpen, () => { appCenterSearch.value = ""; });
 const pendingDeleteContextKey = ref<string | null>(null);
 const editingClipKey = ref<string | null>(null);
 const editingClipName = ref("");
@@ -106,7 +102,6 @@ let moveSubmenuCloseTimer: number | null = null;
 let clipListScrollTimer: number | null = null;
 let clipListResetFrame: number | null = null;
 let selectionScrollFrame: number | null = null;
-let searchReloadTimer: number | null = null;
 let quickPreviewOpenTimer: number | null = null;
 let starPromptTimer: number | null = null;
 let starThanksTimer: number | null = null;
@@ -140,7 +135,6 @@ const categoryItemCounts = computed(() =>
   }, {}),
 );
 
-const formattedShortcut = computed(() => `${formatShortcut("CommandOrControl+F")} ${t("shortcut.search")}`);
 const { width: panelWidth, flushSize } = usePanelViewport(!isSettingsWindow && !isClipViewerWindow, () => {
   closeFloatingLayers();
   scheduleSelectedClipScroll();
@@ -193,6 +187,43 @@ const quickPreviewSize = computed(() => {
 });
 const quickPreviewColorValue = computed(() => quickPreviewContent.value.trim());
 
+function openSearch() {
+  if (shareItem.value || updater.updateDialogOpen.value) return;
+  if (isSearchOpen.value) {
+    quickSearch.value?.focusInput(true);
+    return;
+  }
+  closeFloatingLayers();
+  cancelItemDrag();
+  isSearchOpen.value = true;
+}
+
+function closeSearch(restoreFocus = true) {
+  if (!isSearchOpen.value) return;
+  isSearchOpen.value = false;
+  appCenterSearch.value = "";
+  if (restoreFocus) topBar.value?.focusSearchTrigger();
+}
+
+function toggleSearch() {
+  if (isSearchOpen.value) closeSearch();
+  else openSearch();
+}
+
+function handleTopBarPress(event: PointerEvent) {
+  if (!topBar.value?.isSearchTrigger(event.target)) closeSearch(false);
+}
+
+function finishSearchReveal() {
+  closeSearch(false);
+  void nextTick(() => {
+    const card = clipListElement.value?.querySelector<HTMLElement>(".clip-card-selected");
+    if (card) card.focus({ preventScroll: true });
+    else topBar.value?.focusSearchTrigger();
+    scheduleSelectedClipScroll();
+  });
+}
+
 function toggleAppCenter() {
   isAppCenterOpen.value = !isAppCenterOpen.value;
   closeFloatingLayers();
@@ -201,6 +232,7 @@ function toggleAppCenter() {
 }
 
 function handlePanelShortcutOpened() {
+  closeSearch(false);
   isAppCenterOpen.value = false;
   closeFloatingLayers();
   scheduleClipListScrollReset();
@@ -208,6 +240,7 @@ function handlePanelShortcutOpened() {
 }
 
 function handleAppCenterShortcutOpened() {
+  closeSearch(false);
   isAppCenterOpen.value = true;
   closeFloatingLayers();
   scheduleClipListScrollReset();
@@ -221,7 +254,7 @@ onMounted(async () => {
   document.addEventListener("keydown", handleKeydown, true);
   document.addEventListener("keyup", handleKeyup, true);
   document.addEventListener("selectionchange", handleSelectionChange);
-  window.addEventListener("blur", closeFloatingLayers);
+  window.addEventListener("blur", handleWindowBlur);
   document.addEventListener("visibilitychange", handleVisibilityChange);
 
   await store.load();
@@ -262,13 +295,12 @@ onUnmounted(() => {
   document.removeEventListener("keydown", handleKeydown, true);
   document.removeEventListener("keyup", handleKeyup, true);
   document.removeEventListener("selectionchange", handleSelectionChange);
-  window.removeEventListener("blur", closeFloatingLayers);
+  window.removeEventListener("blur", handleWindowBlur);
   document.removeEventListener("visibilitychange", handleVisibilityChange);
   clearMoveSubmenuCloseTimer();
   clearClipListScrollTimer();
   clearClipListResetFrame();
   clearSelectionScrollFrame();
-  clearSearchReloadTimer();
   clearQuickPreviewTimer();
   clearStarPromptTimer();
   clearStarThanksTimer();
@@ -284,18 +316,11 @@ onUnmounted(() => {
   document.body.classList.remove("ipaste-preserve-current-app");
 });
 
-watch(
-  () => store.search,
-  () => {
-    store.clampSelection();
-    if (store.selectedCategoryId === "history") {
-      scheduleSearchReload();
-    }
-  },
-);
+watch([isAppCenterOpen, () => store.selectedCategoryId], () => closeSearch(false));
+watch(updater.updateDialogOpen, (open) => { if (open) closeSearch(false); });
 
 watch(
-  () => [store.selectedIndex, store.selectedCategoryId, store.search],
+  () => [store.selectedIndex, store.selectedCategoryId],
   () => scheduleSelectedClipScroll(),
   { flush: "post" },
 );
@@ -310,6 +335,7 @@ function applyPanelVisibility(
 ) {
   isPanelVisible = payload.visible;
   setFileReferencePreviewSurfaceVisible(payload.visible);
+  closeSearch(false);
   closeFloatingLayers();
   const nativePanel = payload.visible && Boolean(payload.nativePanel);
   isPreservingCurrentApp.value = payload.visible && payload.preservesCurrentApp && !nativePanel;
@@ -324,7 +350,6 @@ function applyPanelVisibility(
     clearSelectionScrollFrame();
     clearClipListScrollTimer();
     isClipListScrolling.value = false;
-    store.clearSearch();
     isAppCenterOpen.value = false;
     blurActiveElement();
     return;
@@ -961,6 +986,12 @@ function handleKeydown(event: KeyboardEvent) {
     return;
   }
 
+  if (handleSearchKeydown(event)) return;
+  if (event.repeat && (event.key === "Enter" || event.key === "Escape") && !isEditableTarget(event.target)) {
+    event.preventDefault();
+    return;
+  }
+
   if (showStarPrompt.value && event.target instanceof HTMLElement && event.target.closest(".star-prompt")) {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -997,10 +1028,6 @@ function handleKeydown(event: KeyboardEvent) {
       isAppCenterOpen.value = false;
       return;
     }
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
-      event.preventDefault();
-      focusSearch();
-    }
     return;
   }
 
@@ -1021,6 +1048,7 @@ function handleKeydown(event: KeyboardEvent) {
   }
 
   if (isEditableTarget(event.target)) return;
+  if (event.key === "Enter" && topBar.value?.isSearchTrigger(event.target)) return;
 
   if (contextMenu.value) {
     if (event.key === "Escape") {
@@ -1030,15 +1058,32 @@ function handleKeydown(event: KeyboardEvent) {
     return;
   }
 
-  if (handlePanelKey(event.key)) {
+  if (handlePanelKey(event.key)) event.preventDefault();
+}
+
+function handleSearchKeydown(event: KeyboardEvent) {
+  if (quickSearch.value?.isComposing()) return true;
+  const isSearchShortcut = (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey
+    && event.key.toLowerCase() === "f";
+  if (isSearchShortcut && (isSearchOpen.value || !isEditableTarget(event.target))) {
     event.preventDefault();
-    return;
+    if (!event.repeat) openSearch();
+    return true;
+  }
+  if (!isSearchOpen.value) return false;
+
+  if (event.key === "Escape") {
+    if (isAppCenterOpen.value && !quickSearch.value?.containsFocus()
+      && document.querySelector(".mfa-context-menu, .mfa-editor-open")) return true;
+  } else if (event.altKey || event.shiftKey || event.ctrlKey || event.metaKey) {
+    return true;
+  } else if (event.key === "Enter" && event.target instanceof HTMLElement && event.target.closest("button")) {
+    if (event.repeat) event.preventDefault();
+    return true;
   }
 
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
-    event.preventDefault();
-    focusSearch();
-  }
+  if (quickSearch.value?.handleKey(event.key, event.repeat)) event.preventDefault();
+  return true;
 }
 
 function handleKeyup(event: KeyboardEvent) {
@@ -1069,6 +1114,10 @@ function handlePanelKey(key: string) {
     if (key === "Escape") updater.dismissUpdateDialog();
     return true;
   }
+  if (isSearchOpen.value && (!isAppCenterOpen.value || quickSearch.value?.containsFocus())) {
+    quickSearch.value?.handleKey(key);
+    return true;
+  }
   if (showStarPrompt.value && key === "Escape") {
     hideStarSupport();
     return true;
@@ -1077,7 +1126,8 @@ function handlePanelKey(key: string) {
   if (isAppCenterOpen.value) {
     if (appCenterElement.value?.handleNativePanelKey(key)) return true;
     if (key === "Escape") {
-      isAppCenterOpen.value = false;
+      if (isSearchOpen.value) closeSearch();
+      else isAppCenterOpen.value = false;
       return true;
     }
     return false;
@@ -1134,13 +1184,8 @@ function isEditableTarget(target: EventTarget | null) {
   return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }
 
-function focusSearch() {
-  const input = document.querySelector<HTMLInputElement>(".search-box input");
-  input?.focus();
-  input?.select();
-}
-
 async function hidePanelFromUi() {
+  closeSearch(false);
   blurActiveElement();
   await flushSize();
   await store.hidePanel();
@@ -1148,7 +1193,7 @@ async function hidePanelFromUi() {
 
 function scheduleActiveElementBlur() {
   void nextTick(() => {
-    window.requestAnimationFrame(blurActiveElement);
+    window.requestAnimationFrame(() => { if (!isSearchOpen.value) blurActiveElement(); });
   });
 }
 
@@ -1179,9 +1224,14 @@ function closeFloatingLayers() {
   categoryRailElement.value?.closeFloatingLayers();
 }
 
+function handleWindowBlur() {
+  closeSearch(false);
+  closeFloatingLayers();
+}
+
 function handleVisibilityChange() {
   if (document.hidden) {
-    closeFloatingLayers();
+    handleWindowBlur();
   } else {
     refreshFileReferencePreviews();
     scheduleSilentUpdateCheck();
@@ -1322,20 +1372,6 @@ function clearSelectionScrollFrame() {
   selectionScrollFrame = null;
 }
 
-function scheduleSearchReload() {
-  clearSearchReloadTimer();
-  searchReloadTimer = window.setTimeout(() => {
-    searchReloadTimer = null;
-    void store.reloadClips();
-  }, 160);
-}
-
-function clearSearchReloadTimer() {
-  if (searchReloadTimer === null) return;
-  window.clearTimeout(searchReloadTimer);
-  searchReloadTimer = null;
-}
-
 function scrollSelectedClipIntoView() {
   const list = clipListElement.value;
   const selectedCard = list?.querySelector<HTMLElement>(".clip-card-selected");
@@ -1371,25 +1407,25 @@ function scrollSelectedClipIntoView() {
     @click="closeFloatingLayers"
   >
     <section class="flex min-w-0 flex-1 flex-col">
-      <div class="relative">
-        <TopBar
-          v-model="panelSearch"
-          :shortcut="formattedShortcut"
-          :settings-open="false"
-          :app-center-open="isAppCenterOpen"
-          :append-copy-enabled="store.isAppendCopyEnabled"
-          :append-copy-timeout-minutes="store.appendCopyTimeoutMinutes"
-          :has-update="updater.hasAvailableUpdate.value"
-          :downloading-update="updater.updateStatus.value === 'downloading'"
-          :update-progress="updater.updateProgressPercent.value"
-          :update-label="updater.updateButtonText.value"
-          @toggle-settings="store.showSettings"
-          @toggle-app-center="toggleAppCenter"
-          @toggle-append-copy="store.toggleAppendCopy"
-          @open-update="updater.openUpdateDialog"
-          @close="hidePanelFromUi"
-        />
-      </div>
+      <TopBar
+        ref="topBar"
+        :search-open="isSearchOpen"
+        :settings-open="false"
+        :app-center-open="isAppCenterOpen"
+        :append-copy-enabled="store.isAppendCopyEnabled"
+        :append-copy-timeout-minutes="store.appendCopyTimeoutMinutes"
+        :has-update="updater.hasAvailableUpdate.value"
+        :downloading-update="updater.updateStatus.value === 'downloading'"
+        :update-progress="updater.updateProgressPercent.value"
+        :update-label="updater.updateButtonText.value"
+        @pointerdown.capture="handleTopBarPress"
+        @toggle-search="toggleSearch"
+        @toggle-settings="store.showSettings"
+        @toggle-app-center="toggleAppCenter"
+        @toggle-append-copy="store.toggleAppendCopy"
+        @open-update="updater.openUpdateDialog"
+        @close="hidePanelFromUi"
+      />
 
       <LanShareDialog v-if="shareItem" ref="shareDialog" :item="shareItem" @dismiss="shareItem = null" @ended="handleShareEnded" />
 
@@ -1431,11 +1467,21 @@ function scrollSelectedClipIntoView() {
 
       <section
         class="main-content"
-        :class="{ 'main-content-side': isSideLayout, 'main-content-single-column': isSingleColumn }"
+        :class="{ 'main-content-side': isSideLayout && !isAppCenterOpen, 'main-content-single-column': isSingleColumn }"
       >
+        <QuickSearchPanel
+          v-if="isSearchOpen"
+          ref="quickSearch"
+          v-model:app-filter="appCenterSearch"
+          :app-center="isAppCenterOpen"
+          @dismiss="closeSearch()"
+          @reveal="finishSearchReveal"
+        />
+
         <CategoryRail
           v-if="!isAppCenterOpen"
           ref="categoryRailElement"
+          :inert="isSearchOpen"
           :categories="store.categories"
           :selected-category-id="store.selectedCategoryId"
           :editing-category-id="editingCategoryId"
@@ -1453,9 +1499,9 @@ function scrollSelectedClipIntoView() {
           @reorder="reorderCategories"
         />
 
-        <AppCenterView v-if="isAppCenterOpen" ref="appCenterElement" :search="appCenterSearch" @clear-search="appCenterSearch = ''" />
+        <AppCenterView v-if="isAppCenterOpen" ref="appCenterElement" :search="appCenterSearch" @clear-search="closeSearch(false)" />
 
-        <section v-else class="clip-area">
+        <section v-else class="clip-area" :inert="isSearchOpen">
           <div v-if="store.error" class="mx-4 mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             <AlertCircle class="size-4" />
             <span class="min-w-0 flex-1 truncate">{{ store.error }}</span>
@@ -1489,6 +1535,7 @@ function scrollSelectedClipIntoView() {
                 :index="index"
                 :data-item-key="contextItemKey(item)"
                 :data-item-id="item.id"
+                tabindex="-1"
                 :selected="store.selectedIndex === index"
                 :category-tags="itemCategoryTags(item)"
                 :editing-name="editingClipKey === contextItemKey(item) ? editingClipName : null"

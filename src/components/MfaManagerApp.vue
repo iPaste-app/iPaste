@@ -263,15 +263,13 @@ function handleListKeydown(event: KeyboardEvent) {
   if (event.defaultPrevented || !visibleAccounts.value.length) return;
   const target = event.target instanceof HTMLElement ? event.target : null;
   if (document.querySelector("[aria-modal='true']")) return;
-  if (target && target !== document.body && !target.closest(".mfa-manager, .search-box")) return;
-  const inSearch = Boolean(target?.closest(".search-box"));
-  if (target?.closest("input, textarea, select, [contenteditable='true']") && !inSearch) return;
+  if (target && target !== document.body && !target.closest(".mfa-manager")) return;
+  if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
   const index = visibleAccounts.value.findIndex((account) => account.id === selectedAccountId.value);
   const delta = selectionDelta(event.key, columnCount.value);
-  if (inSearch && (event.key === "ArrowLeft" || event.key === "ArrowRight")) return;
   if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && delta !== null) {
     event.preventDefault();
-    moveSelection(inSearch ? 0 : delta);
+    moveSelection(delta);
     return;
   }
   const account = visibleAccounts.value[index];
@@ -279,7 +277,7 @@ function handleListKeydown(event: KeyboardEvent) {
   if (event.key === "Enter" && !event.ctrlKey && !event.metaKey && !target?.closest("button")) {
     event.preventDefault();
     void pasteAccountCodeFromCard(account);
-  } else if (!inSearch && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") {
+  } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") {
     if (window.getSelection()?.toString()) return;
     event.preventDefault();
     void copyAccountCodeFromCard(account);

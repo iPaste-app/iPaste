@@ -1,3 +1,7 @@
+import type { Language } from "./i18n/catalogs";
+
+export type { Language } from "./i18n/catalogs";
+
 export type ClipType = "text" | "link" | "color" | "image" | "file" | "html";
 
 // A file clip stores an immutable absolute path in `text`, never file contents.
@@ -56,7 +60,6 @@ export type CategoryWithItem = {
 export type PanelOpenBehavior = "history" | "last_selected";
 export type PanelLayout = "top" | "side";
 export type OcrMode = "fast" | "best";
-export type Language = "en" | "zh-CN" | "ja" | "ko" | "es" | "fr" | "de";
 export type MfaAlgorithm = "SHA1" | "SHA256" | "SHA512";
 
 export type MfaAccount = {

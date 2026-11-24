@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { statSync } from "node:fs";
 import { test } from "node:test";
 import { createRenderer, h, markRaw, nextTick, ref } from "vue";
 import ClipCard from "../src/components/ClipCard.vue";
@@ -165,7 +166,28 @@ test("file helpers preserve Windows and POSIX names while handling unknown exten
   assert.equal(fileIconSrc(posixLiteralBackslash), "/file-icons/code.webp");
   assert.equal(fileIconSrc("/tmp/report.PDF"), "/file-icons/pdf.webp");
   assert.equal(fileIconSrc("/tmp/report.docx"), "/file-icons/document.webp");
+  assert.equal(fileIconSrc("/tmp/query.sql"), "/file-icons/code.webp");
+  assert.equal(fileIconSrc("/tmp/.ENV"), "/file-icons/code.webp");
   assert.equal(fileIconSrc("/tmp/file.unknown"), "/file-icons/generic.webp");
+});
+
+test("installer, ebook and database extensions choose their bundled file artwork", () => {
+  const cases = [
+    ["android-installer", ["apk", "aab", "apks", "xapk", "apkm"]],
+    ["windows-installer", ["exe", "msi", "msix", "appx", "appxbundle", "msixbundle"]],
+    ["apple-installer", ["dmg", "pkg", "app", "ipa"]],
+    ["ebook", ["epub", "mobi", "azw", "azw3", "azw4", "fb2", "ibooks", "kfx"]],
+    ["database", ["db", "sqlite", "sqlite3", "db3", "duckdb", "dbf", "mdb", "accdb"]],
+  ] as const;
+
+  for (const [category, extensions] of cases) {
+    const src = `/file-icons/${category}.webp`;
+    assert.ok(statSync(`public${src}`).isFile(), `${category} artwork is bundled`);
+    for (const extension of extensions) {
+      assert.equal(fileIconSrc(`/tmp/sample.${extension}`), src, extension);
+      assert.equal(fileIconSrc(String.raw`C:\Downloads\Preview.${extension.toUpperCase()}`), src, extension);
+    }
+  }
 });
 
 test("file sizes choose readable units and omit unavailable metadata", () => {
@@ -255,8 +277,9 @@ test("an image file card uses only the generated thumbnail and clears it when th
   }
 });
 
-test("a file card shows its filename, keeps the path in its tooltip, and applies the untruncated reference", () => {
-  const item = historyFile();
+test("an APK card shows its artwork and filename, and applies the untruncated reference", () => {
+  const apkReference = String.raw`C:\Users\Lin Zhao\Downloads\iPaste Preview.APK`;
+  const item = historyFile(apkReference);
   const applied: ClipViewItem[] = [];
   const root = new HostNode("root");
   const app = renderer.createApp({
@@ -275,23 +298,26 @@ test("a file card shows its filename, keeps the path in its tooltip, and applies
   try {
     const card = all(root, (element) => element.tag === "article" && hasClass(element, "clip-card-type-file"))[0];
     assert.ok(card, "file card renders with its file type");
+    const artwork = all(card, (element) => element.tag === "img" && hasClass(element, "clip-file-watermark"))[0];
+    assert.equal(artwork?.props.src, "/file-icons/android-installer.webp");
+
     const title = all(card, (element) =>
-      nodeText(element) === "合同 Final.PDF"
-        && element.props.title === fileReference
-        && element.props["data-tooltip"] === fileReference,
+      nodeText(element) === "iPaste Preview.APK"
+        && element.props.title === apkReference
+        && element.props["data-tooltip"] === apkReference,
     )[0];
     assert.ok(title, "file card exposes its filename with the complete reference as a tooltip");
-    assert.equal(nodeText(card).includes(fileReference), false, "the full path is not laid out as card body text");
+    assert.equal(nodeText(card).includes(apkReference), false, "the full path is not laid out as card body text");
 
     const metric = all(card, (element) => hasClass(element, "clip-metric-badge"))[0];
-    assert.equal(nodeText(metric), "PDF");
+    assert.equal(nodeText(metric), "APK");
     assert.equal(nodeText(metric).includes("stats.chars"), false, "file references do not use text character statistics");
 
     const doubleClick = card.props.onDblclick as ((input: ReturnType<typeof event>) => void) | undefined;
     assert.ok(doubleClick, "file card retains its apply gesture");
     doubleClick(event(card));
     assert.deepEqual(applied, [item]);
-    assert.equal(applied[0].text, fileReference);
+    assert.equal(applied[0].text, apkReference);
   } finally {
     app.unmount();
   }

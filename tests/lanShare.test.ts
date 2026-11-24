@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createRenderer, h, nextTick } from "vue";
 import { useLanShare } from "../src/composables/useLanShare";
+import { catalogs } from "../src/i18n/catalogs";
 import { shareCountdown, type LanShare } from "../src/lib/lanShare";
-import { copySharedText, remainingTime } from "../src-tauri/src/lan_share/page.js";
+import { copySharedText, remainingTime, resolveShareLanguage, sharePageMessages } from "../src-tauri/src/lan_share/page.js";
 
 const state = globalThis.__lanShareTest;
 const item = { id: "clip-a", collection: "history", clipType: "text", text: "sample" } as const;
@@ -143,4 +144,31 @@ test("receiver never reports success when both clipboard methods fail", async ()
   const success = await copySharedText("selected", element, { clipboard: { writeText: async () => { throw Error("denied"); } }, execCommand: () => false });
   assert.equal(success, false);
   assert.deepEqual(calls, ["focus", "select", [0, 8]]);
+});
+
+test("the share page uses the recipient's supported languages and keeps region-sensitive variants", () => {
+  const examples = [
+    ["zh-TW", "zh-TW"], ["zh-Hant-TW", "zh-TW"], ["zh-HK", "zh-TW"], ["zh-MO", "zh-TW"],
+    ["zh-CN", "zh-CN"], ["zh-Hans-HK", "zh-CN"], ["zh", "zh-CN"],
+    ["pt-BR", "pt-BR"], ["pt-PT", "pt-BR"], ["it-IT", "it"], ["ru-RU", "ru"], ["pl-PL", "pl"],
+    ["tr-TR", "tr"], ["nl-BE", "nl"], ["id-ID", "id"], ["vi-VN", "vi"], ["th-TH", "th"],
+    ["ja-JP", "ja"], ["ko-KR", "ko"], ["de-AT", "de"], ["fr-CA", "fr"], ["es-MX", "es"],
+  ];
+  for (const [tag, language] of examples) {
+    assert.equal(resolveShareLanguage([tag]), language);
+  }
+  assert.equal(resolveShareLanguage(["sv-SE", "ZH-hant"]), "zh-TW");
+  assert.equal(resolveShareLanguage(["sv-SE", "fr-CA"]), "fr");
+  assert.equal(resolveShareLanguage(["constructor", "sv-SE"]), "en");
+  assert.equal(resolveShareLanguage([]), "en");
+});
+
+test("every share page language has copy, download, status, and accessibility strings", () => {
+  assert.deepEqual(Object.keys(sharePageMessages).sort(), Object.keys(catalogs).sort());
+  const keys = Object.keys(sharePageMessages.en).sort();
+  for (const [language, messages] of Object.entries(sharePageMessages)) {
+    assert.deepEqual(Object.keys(messages).sort(), keys, language);
+    assert.ok(Object.values(messages).every(message => message.trim()), language);
+    assert.ok(messages.remaining.includes("{time}"), language);
+  }
 });
